@@ -1,7 +1,6 @@
 from collections import OrderedDict
 from typing import Union
 
-import torch as th
 import torch.nn as nn
 
 

@@ -1,21 +1,27 @@
 import importlib
 import os
 import random
-import time
-from collections import OrderedDict, defaultdict
+from collections import defaultdict
 from copy import deepcopy
-from math import inf
-from typing import Sequence
 
 import numpy as np
 import torch
 import torch as th
-import torch.distributed as dist
 from easydict import EasyDict
 from torch import Tensor
-from torch.utils.data import Dataset
 from torchvision.utils import make_grid
-from tqdm import tqdm
+
+__all__ = [
+    "AverageMeter",
+    "AverageMeters",
+    "seed_everything",
+    "find_free_port",
+    "get_model_params",
+    "instantiate_from_config",
+    "get_obj_from_str",
+    "BlackHole",
+    "tensor_to_image",
+]
 
 
 class AverageMeter(object):
@@ -64,16 +70,6 @@ class AverageMeters:
         return " ".join(msgs)
 
 
-def tqdm_(*args, **kwargs):
-    if dist.is_initialized():
-        if dist.get_rank() == 0:
-            return tqdm(*args, **kwargs)
-        else:
-            return BlackHole()
-    else:
-        return tqdm(*args, **kwargs)
-
-
 def seed_everything(seed):
     random.seed(seed)
     os.environ["PYTHONHASHSEED"] = str(seed)
@@ -102,79 +98,6 @@ def get_model_params(model):
     for param in model.parameters():
         model_size += param.data.nelement()
     return model_size
-
-
-class ChainDataset(Dataset):
-    def __init__(self, *datasets) -> None:
-        super().__init__()
-        self.datasets = datasets
-        self.lens = []
-        self.cum_lens = []
-        self.indices = []
-        cum_n = 0
-        for i, dataset in enumerate(self.datasets):
-            n = len(dataset)
-            self.lens.append(n)
-            self.cum_lens.append(cum_n)
-            self.indices += [i for _ in range(n)]
-            cum_n += n
-        self.total_len = sum(self.lens)
-
-    def __len__(self):
-        return self.total_len
-
-    def __getitem__(self, idx):
-        ds_idx = self.indices[idx]
-        out = self.datasets[ds_idx][idx - self.cum_lens[ds_idx]]
-        return out
-
-
-class SubDataset(Dataset):
-    def __init__(self, dataset, indices) -> None:
-        super().__init__()
-        self.dataset = dataset
-        self.indices = indices
-
-    def __len__(self):
-        return len(self.indices)
-
-    def __getitem__(self, idx):
-        subidx = self.indices[idx]
-        return self.dataset[subidx]
-
-
-class Tiktok:
-    def __init__(self) -> None:
-        self.tok()
-
-    def tik(self):
-        return time.time() - self.now
-
-    def tok(self):
-        self.now = time.time()
-
-    def tiktok(self):
-        sec = self.tik()
-        self.tok()
-        return sec
-
-
-class ChachedDataset(Dataset):
-    def __init__(self, use_cache: bool) -> None:
-        super().__init__()
-        self.use_cache = use_cache
-        self.cache = {}
-
-    def __contains__(self, idx):
-        return idx in self.cache
-
-    def get(self, idx):
-        if self.use_cache and idx in self.cache:
-            return self.cache[idx]
-
-    def put(self, idx, data):
-        if self.use_cache:
-            self.cache[idx] = data
 
 
 def _parse_pyinstance_dict(params: dict):
@@ -242,64 +165,6 @@ def tensor_to_image(images, nrow):
     return grid
 
 
-def try_remove_file(file):
-    for _ in range(10):
-        try:
-            os.remove(file)
-            break
-        except:
-            print("Warn: Failed to remove", file)
-            time.sleep(0.1)
-
-
-def safe_all_reduce(x, reduce_op=dist.ReduceOp.SUM):
-    if dist.is_initialized():
-        dist.all_reduce(x, reduce_op)
-    return x
-
-
-def safe_all_mean(x):
-    x = safe_all_reduce(x)
-    if dist.is_initialized():
-        x /= dist.get_world_size()
-    return x
-
-
-def safe_all_gather(x, dim=0):
-    if dist.is_initialized():
-        xs = [torch.empty_like(x) for _ in range(dist.get_world_size())]
-        dist.all_gather(xs, x)
-        x = torch.cat(xs, dim=dim)
-    return x
-
-
-def safe_barrier():
-    if dist.is_initialized():
-        dist.barrier()
-
-
-def safe_broadcast(x, src):
-    if dist.is_initialized():
-        dist.broadcast(x, src)
-
-
-def refine_state_dict(ckpt):
-    module_in_module = False
-    for k in ckpt["model"]:
-        if k.startswith("model."):
-            module_in_module = True
-            break
-
-    if module_in_module:
-        state_dict = OrderedDict()
-        for k, v in ckpt["model"].items():
-            if k.startswith("model."):
-                state_dict[k[6:]] = v
-    else:
-        state_dict = ckpt["model"]
-    return state_dict
-
-
 class BlackHole(int):
     def __setattr__(self, *args, **kwargs):
         pass
@@ -318,26 +183,6 @@ class BlackHole(int):
 
     def __getitem__(self, *args, **kwargs):
         return self
-
-
-def sdf_standardize(sdf, c, mu, sig, gamma):
-    sdf = sdf.clamp(c[0], c[1])
-    if gamma != 1.0:
-        sdf = sdf.sign() * sdf.abs().pow(gamma)
-    sdf = (sdf - mu) / sig
-    return sdf
-
-
-def infinite_dataloader(dl, n_iters=inf):
-    step = 0
-    keep = True
-    while keep:
-        for batch in dl:
-            yield batch
-            step += 1
-            if step > n_iters:
-                keep = False
-                break
 
 
 def tensor_to_image(x: Tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):

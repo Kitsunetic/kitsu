@@ -1,7 +1,6 @@
 from typing import Sequence
 
 import torch as th
-import torch.nn.functional as F
 
 
 def discrete_grid_sample(p, x):

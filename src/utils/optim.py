@@ -1,10 +1,6 @@
-import math
 import random
-from typing import List, Tuple
 
 import torch
-import torch.nn as nn
-import torch.nn.functional as F
 
 
 class SAM(torch.optim.Optimizer):

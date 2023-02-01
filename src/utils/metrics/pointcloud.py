@@ -4,13 +4,8 @@ import torch as th
 
 # from extensions.ChamferDistancePytorch.chamfer3D.dist_chamfer_3D import chamfer_3DDist
 # from extensions.PyTorchEMD.emd import earth_mover_distance as EMD
-from pytorch3d.ops import knn_points, sample_points_from_meshes
-from pytorch3d.structures import Meshes
+from pytorch3d.ops import knn_points
 from torch import Tensor
-from torch_scatter import scatter_sum
-from tqdm import tqdm, trange
-
-from src.utils import BlackHole
 
 # cham3D = chamfer_3DDist()
 

@@ -2,6 +2,8 @@ from datetime import datetime
 from functools import reduce
 from pathlib import Path
 
+__all__ = ["CustomLogger", "timenow", "basicConfig", "getLogger"]
+
 
 class CustomLogger:
     def __init__(self, filename=None, filemode="a", use_color=True, lock=False):
