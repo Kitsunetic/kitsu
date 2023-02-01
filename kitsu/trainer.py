@@ -16,10 +16,10 @@ from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from src import utils
-from src.logger import CustomLogger
-from src.utils.ema import ema
-from src.utils.optim import ESAM, SAM
+from kitsu import utils
+from kitsu.logger import CustomLogger
+from kitsu.utils.ema import ema
+from kitsu.utils.optim import ESAM, SAM
 
 
 class BasePreprocessor(metaclass=ABCMeta):

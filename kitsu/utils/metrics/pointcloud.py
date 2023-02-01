@@ -1,7 +1,6 @@
 import sys
 
 import torch as th
-from extensions.PyTorchEMD.emd import earth_mover_distance as EMD
 
 # from extensions.ChamferDistancePytorch.chamfer3D.dist_chamfer_3D import chamfer_3DDist
 # from extensions.PyTorchEMD.emd import earth_mover_distance as EMD

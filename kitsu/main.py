@@ -7,7 +7,7 @@ os.environ["OMP_NUM_THREADS"] = str(min(16, mp.cpu_count()))
 import torch
 import torch.distributed as dist
 
-from src import logger, options, utils
+from kitsu import logger, options, utils
 
 
 def main_worker(rank, args):
