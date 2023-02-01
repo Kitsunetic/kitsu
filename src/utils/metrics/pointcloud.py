@@ -1,6 +1,7 @@
 import sys
 
 import torch as th
+from extensions.PyTorchEMD.emd import earth_mover_distance as EMD
 
 # from extensions.ChamferDistancePytorch.chamfer3D.dist_chamfer_3D import chamfer_3DDist
 # from extensions.PyTorchEMD.emd import earth_mover_distance as EMD
@@ -96,8 +97,6 @@ class PointDist:
             raise NotImplementedError(reduction)
 
     def emd(self, reduction="mean"):
-        from extensions.PyTorchEMD.emd import earth_mover_distance as EMD
-
         dist = EMD(self.a, self.b, transpose=False)  # b
         if reduction == "mean":
             return dist.mean()
