@@ -19,4 +19,5 @@ setup(
         "easydict",
         "tqdm",
     ],
+    entry_points={"console_scripts": ["kitsu=src.main:main"]},
 )
