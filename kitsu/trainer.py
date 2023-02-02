@@ -336,9 +336,14 @@ class BaseTrainer(BaseWorker):
                 )
             ):
                 if self.small_is_better:
-                    self.best = min(self.best, o_lst[0][self.monitor])
+                    if self.best > o_lst[0][self.monitor]:
+                        self.best = o_lst[0][self.monitor]
+                        improved = True
                 else:
-                    self.best = max(self.best, o_lst[0][self.monitor])
+                    if self.best < o_lst[0][self.monitor]:
+                        self.best = max(self.best, o_lst[0][self.monitor])
+                        improved = True
+
                 self.best_epoch = self.epoch
                 self.save(self.args.exp_path / "best_ep{:04d}.pth".format(self.epoch))
                 saved_files = sorted(list(self.args.exp_path.glob("best_ep*.pth")))
@@ -502,11 +507,16 @@ class StepTrainer(BaseTrainer):
                 )
             ):
                 if self.small_is_better:
-                    self.best = min(self.best, o_lst[0][self.monitor])
+                    if self.best > o_lst[0][self.monitor]:
+                        self.best = o_lst[0][self.monitor]
+                        improved = True
                 else:
-                    self.best = max(self.best, o_lst[0][self.monitor])
+                    if self.best < o_lst[0][self.monitor]:
+                        self.best = max(self.best, o_lst[0][self.monitor])
+                        improved = True
+
                 self.best_epoch = self.epoch
-                self.save(self.args.exp_path / "best_ep{:04d}.pth".format(self.epoch))
+                self.save(self.args.exp_path / "best_ep{:06d}.pth".format(self.epoch))
                 saved_files = sorted(list(self.args.exp_path.glob("best_ep*.pth")))
                 if len(saved_files) > self.num_saves:
                     to_deletes = saved_files[: len(saved_files) - self.num_saves]
