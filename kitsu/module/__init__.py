@@ -1,1 +1,1 @@
-from . import func, init
+from . import func, init, loss
