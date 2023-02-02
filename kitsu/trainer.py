@@ -560,19 +560,20 @@ class StepTrainer(BaseTrainer):
 
     def fit(self):
         o_train = utils.AverageMeters()
-        with tqdm(total=self.args.epochs, ncols=150, file=sys.stdout, disable=not self.rankzero, desc="Step") as t:
+        with tqdm(total=self.args.epochs, ncols=150, file=sys.stdout, disable=not self.rankzero, desc="Step") as pbar:
             self.model_optim.train()
             for self.epoch, batch in enumerate(infinite_dataloader(self.dl_train), 1):
                 self.train_batch(batch, o_train)
-                t.set_postfix_str(o_train.to_msg())
+                pbar.set_postfix_str(o_train.to_msg())
 
                 if self._is_eval_stage:
+                    pbar.clear()
                     self.model_optim.eval()
                     self.stage_eval(o_train)
                     self.model_optim.train()
                     o_train = utils.AverageMeters()
 
-                t.update()
+                pbar.update()
 
                 if self.args.debug and self.epoch >= 2:
                     break
