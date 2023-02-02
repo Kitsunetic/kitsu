@@ -3,7 +3,9 @@ import random
 import sys
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
+from contextlib import contextmanager
 from copy import deepcopy
+from functools import reduce
 from typing import List, Sequence, Tuple
 
 import numpy as np
@@ -18,6 +20,7 @@ from tqdm import tqdm
 
 from kitsu import utils
 from kitsu.logger import CustomLogger
+from kitsu.utils.data import infinite_dataloader
 from kitsu.utils.ema import ema
 from kitsu.utils.optim import ESAM, SAM
 
@@ -76,33 +79,6 @@ class BaseWorker(metaclass=ABCMeta):
     def log(self) -> CustomLogger:
         return self.args.log
 
-    def _tqdm(self, total, prefix):
-        if self.rankzero:
-            desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
-            return tqdm(total=total, ncols=150, file=sys.stdout, desc=desc, leave=True)
-        else:
-            return utils.BlackHole()
-
-    def safe_gather(self, x, cat=True, cat_dim=0):
-        if self.ddp:
-            xs = [torch.empty_like(x) for _ in range(self.args.world_size)]
-            dist.all_gather(xs, x)
-            if cat:
-                return torch.cat(xs, dim=cat_dim)
-            else:
-                return xs
-        else:
-            return x
-
-    def safe_reduce(self, x, op=dist.ReduceOp.SUM):
-        if self.ddp:
-            dist.all_reduce(x, op=op)
-        return x
-
-    def safe_barrier(self):
-        if self.ddp:
-            dist.barrier()
-
     def collect_log(self, s, prefix="", postfix=""):
         keys = list(s.log.keys())
         if self.ddp:
@@ -140,16 +116,17 @@ class BaseTrainer(BaseWorker):
         args,
         n_samples_per_class: int = 10,
         find_unused_parameters: bool = False,
-        sample_at_least_per_epochs: int = None,
+        sample_at_least_per_epochs: int = None,  # sampling is done not so frequently
         mixed_precision: bool = False,
         clip_grad: float = 0.0,
-        num_saves: int = 5,
-        epochs_to_save: int = 0,
+        num_saves: int = 5,  # save only latest n checkpoints
+        epochs_to_save: int = 0,  # save checkpoint and do sampling after n epochs
         use_sync_bn: bool = False,
         monitor: str = "loss",
         small_is_better: bool = True,
         use_sam: bool = False,  # Sharpness-Aware Minimization
         use_esam: bool = False,  # Efficient Sharpness-aware Minimization
+        save_only_improved: bool = True,
     ) -> None:
         assert not (mixed_precision and (use_sam or use_esam))
         # assert not (use_sam and use_esam)
@@ -168,6 +145,7 @@ class BaseTrainer(BaseWorker):
         self.small_is_better = small_is_better
         self.use_sam = use_sam
         self.use_esam = use_esam
+        self.save_only_improved = save_only_improved
 
         if self.mixed_precision:
             self.scaler = GradScaler()
@@ -184,18 +162,22 @@ class BaseTrainer(BaseWorker):
             self.args.epochs = 2
             self.epochs_to_save = 0
 
+    @property
+    def model(self):
+        return self.model_src
+
     def build_network(self):
-        self.model = utils.instantiate_from_config(self.args.model).cuda()
+        self.model_src = utils.instantiate_from_config(self.args.model).cuda()
         if self.ddp:
             if self.use_sync_bn:
-                self.model = nn.SyncBatchNorm.convert_sync_batchnorm(self.model)
+                self.model_src = nn.SyncBatchNorm.convert_sync_batchnorm(self.model_src)
             self.model_optim = DDP(
-                self.model,
+                self.model_src,
                 device_ids=[self.args.gpu],
                 find_unused_parameters=self.find_unused_parameters,
             ).cuda()
         else:
-            self.model_optim = self.model
+            self.model_optim = self.model_src
 
         self.optim = utils.instantiate_from_config(self.args.optim, self.model_optim.parameters())
 
@@ -234,7 +216,7 @@ class BaseTrainer(BaseWorker):
     def save(self, out_path):
         data = {
             "optim": self.optim.state_dict(),
-            "model": self.model.state_dict(),
+            "model": self.model_src.state_dict(),
         }
         torch.save(data, str(out_path))
 
@@ -243,12 +225,12 @@ class BaseTrainer(BaseWorker):
 
     @property
     def device(self):
-        return next(self.model.parameters()).device
+        return next(self.model_src.parameters()).device
 
     @property
     def model_params(self):
         model_size = 0
-        for param in self.model.parameters():
+        for param in self.model_src.parameters():
             if param.requires_grad:
                 model_size += param.data.nelement()
         return model_size
@@ -337,50 +319,47 @@ class BaseTrainer(BaseWorker):
         return o
 
     @torch.no_grad()
-    def evaluation(self, o1, o2):
+    def evaluation(self, *o_lst):
         assert self.monitor in o2.data, f"No monitor {self.monitor} in validation results: {list(o2.data.keys())}"
 
-        self.step_sched(o2[self.monitor], is_on_epoch=True)
+        self.step_sched(o_lst[0][self.monitor], is_on_epoch=True)
 
         improved = False
         if self.rankzero:  # scores are not calculated in other nodes
             flag = ""
             if (
-                (self.small_is_better and o2[self.monitor] < self.best)
-                or (not self.small_is_better and o2[self.monitor] > self.best)
+                (self.small_is_better and o_lst[0][self.monitor] < self.best)
+                or (not self.small_is_better and o_lst[0][self.monitor] > self.best)
                 or (
                     self.sample_at_least_per_epochs is not None
                     and (self.epoch - self.best_epoch) >= self.sample_at_least_per_epochs
                 )
             ):
                 if self.small_is_better:
-                    self.best = min(self.best, o2[self.monitor])
+                    self.best = min(self.best, o_lst[0][self.monitor])
                 else:
-                    self.best = max(self.best, o2[self.monitor])
+                    self.best = max(self.best, o_lst[0][self.monitor])
                 self.best_epoch = self.epoch
                 self.save(self.args.exp_path / "best_ep{:04d}.pth".format(self.epoch))
                 saved_files = sorted(list(self.args.exp_path.glob("best_ep*.pth")))
                 if len(saved_files) > self.num_saves:
                     to_deletes = saved_files[: len(saved_files) - self.num_saves]
                     for to_delete in to_deletes:
-                        utils.try_remove_file(str(to_delete))
+                        utils.io.try_remove_file(str(to_delete))
 
                 flag = "*"
-                improved = self.epoch > self.epochs_to_save or self.args.debug
+                improved = self.epoch > self.epochs_to_save or self.args.debug or not self.save_only_improved
 
             msg = "Epoch[%03d/%03d]" % (self.epoch, self.args.epochs)
-            msg += " %s[%.4f;%.4f]" % (self.monitor, o1[self.monitor], o2[self.monitor])
+            msg += f" {self.monitor}[" + ";".join([o._get(self.monitor) for o in o_lst]) + "]"
             msg += " (best:%.4f%s)" % (self.best, flag)
-            for k in sorted(list(set(o1.data.keys()) | set(o2.data.keys()))):
-                if k == self.monitor:
-                    continue
 
-                if k in o1.data and k in o2.data:
-                    msg += " %s[%.4f;%.4f]" % (k, o1[k], o2[k])
-                elif k in o2.data:
-                    msg += " %s[_;%.4f]" % (k, o2[k])
-                else:
-                    msg += " %s[%.4f;_]" % (k, o1[k])
+            keys = reduce(lambda x, o: x | set(o.data.keys()), o_lst, set())
+            keys = sorted(list(filter(lambda x: x != self.monitor, keys)))
+
+            for k in keys:
+                msg += f" {k}[" + ";".join([o._get(k) for o in o_lst]) + "]"
+
             self.log.info(msg)
             self.log.flush()
 
@@ -394,7 +373,7 @@ class BaseTrainer(BaseWorker):
     def fit_loop(self):
         o1 = self.train_epoch(self.dl_train)
         o2 = self.valid_epoch(self.dl_valid)
-        improved = self.evaluation(o1, o2)
+        improved = self.evaluation(o2, o1)
         if improved:
             self.sample()
 
@@ -421,53 +400,44 @@ class BaseTrainerEMA(BaseTrainer):
         super().__init__(*args, **kwargs)
         self.ema_decay = ema_decay
 
+        self._ema_state = False
+
+    @contextmanager
+    def ema_state(self, activate=True):
+        previous = self._ema_state
+        self._ema_state = activate
+        yield
+        self._ema_state = previous
+
     def build_network(self):
         super().build_network()
-        self.model_ema = deepcopy(self.model)
-        self.model_ema.load_state_dict(self.model.state_dict())
+        self.model_ema = deepcopy(self.model_src)
+        self.model_ema.load_state_dict(self.model_src.state_dict())
         self.model_ema.eval().requires_grad_(False)
 
     def on_train_batch_end(self, s):
         super().on_train_batch_end(s)
-        ema(self.model, self.model_ema, self.ema_decay)
+        ema(self.model_src, self.model_ema, self.ema_decay)
+
+    def save(self, out_path):
+        data = {
+            "optim": self.optim.state_dict(),
+            "model": self.model_src.state_dict(),
+            "model_ema": self.model_ema.state_dict(),
+        }
+        torch.save(data, str(out_path))
 
 
 class StepTrainer(BaseTrainer):
     def __init__(
         self,
         args,
-        n_steps,
-        n_steps_valid,
-        n_steps_test,
-        save_per_steps,
         valid_per_steps,
-        test_per_steps,
-        sample_per_steps,
-        n_samples_per_class=10,
-        find_unused_parameters=True,
-        sample_at_least_per_epochs=None,
-        mixed_precision=False,
-        clip_grad=0.0,
-        num_saves=5,
-        epochs_to_save=0,
+        **kwargs,
     ) -> None:
-        super().__init__(
-            args,
-            n_samples_per_class,
-            find_unused_parameters,
-            sample_at_least_per_epochs,
-            mixed_precision,
-            clip_grad,
-            num_saves,
-            epochs_to_save,
-        )
-        self.n_steps = n_steps
-        self.n_steps_valid = n_steps_valid
-        self.n_steps_test = n_steps_test
-        self.save_per_steps = save_per_steps
+        super().__init__(args, **kwargs)
+
         self.valid_per_steps = valid_per_steps
-        self.test_per_steps = test_per_steps
-        self.sample_per_steps = sample_per_steps
 
     def train_batch(self, batch, o: utils.AverageMeters):
         s = self.preprocessor(batch, augmentation=True)
@@ -495,100 +465,108 @@ class StepTrainer(BaseTrainer):
         self.step_sched(is_on_batch=True)
 
     @torch.no_grad()
-    def valid_epoch(self, dl: "DataLoader", prefix="Valid", n_iter=None):
-        self.model_optim.eval()
+    def valid_epoch(self, dl: "DataLoader", prefix="Valid"):
         o = utils.AverageMeters()
+        desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
 
-        if self.rankzero:
-            desc = f"{prefix} [{self.epoch:04d}/{self.n_steps:04d}]"
-            t = tqdm(total=len(dl.dataset) if n_iter is None else n_iter, ncols=150, file=sys.stdout, desc=desc, leave=True)
-        if n_iter is not None:
-            dl = utils.infinite_dataloader(dl, n_iter)
-        for batch in dl:
-            s = self.preprocessor(batch, augmentation=False)
-            self.step(s)
+        with tqdm(total=len(dl.dataset), ncols=150, file=sys.stdout, desc=desc, leave=False, disable=not self.rankzero) as pbar:
+            for batch in dl:
+                s = self.preprocessor(batch, augmentation=False)
+                self.step(s)
 
-            n, g = self.collect_log(s)
-            o.update_dict(n, g)
-            if self.rankzero:
-                t.set_postfix_str(o.to_msg(), refresh=False)
-                t.update(min(n, t.total - t.n))
+                n, g = self.collect_log(s)
+                o.update_dict(n, g)
 
-            self.on_valid_batch_end(s)
+                pbar.set_postfix_str(o.to_msg(), refresh=False)
+                pbar.update(min(n, pbar.total - pbar.n))
 
-            if self.args.debug:
-                break
-        if self.rankzero:
-            t.close()
+                self.on_valid_batch_end(s)
+
+                if self.args.debug:
+                    break
         return o
 
     @torch.no_grad()
-    def test_epoch(self, dl: "DataLoader", prefix="Test", n_iter=None):
-        return self.valid_epoch(dl, prefix, n_iter)
+    def evaluation(self, *o_lst):
+        self.step_sched(o_lst[0][self.monitor], is_on_epoch=True)
+
+        improved = False
+        if self.rankzero:  # scores are not calculated in other nodes
+            flag = ""
+            if (
+                (self.small_is_better and o_lst[0][self.monitor] < self.best)
+                or (not self.small_is_better and o_lst[0][self.monitor] > self.best)
+                or (
+                    self.sample_at_least_per_epochs is not None
+                    and (self.epoch - self.best_epoch) >= self.sample_at_least_per_epochs
+                )
+            ):
+                if self.small_is_better:
+                    self.best = min(self.best, o_lst[0][self.monitor])
+                else:
+                    self.best = max(self.best, o_lst[0][self.monitor])
+                self.best_epoch = self.epoch
+                self.save(self.args.exp_path / "best_ep{:04d}.pth".format(self.epoch))
+                saved_files = sorted(list(self.args.exp_path.glob("best_ep*.pth")))
+                if len(saved_files) > self.num_saves:
+                    to_deletes = saved_files[: len(saved_files) - self.num_saves]
+                    for to_delete in to_deletes:
+                        utils.io.try_remove_file(str(to_delete))
+
+                flag = "*"
+                improved = self.epoch > self.epochs_to_save or self.args.debug or not self.save_only_improved
+
+            msg = f"Epoch[%03d/%03d]" % (self.epoch, self.args.epochs)
+            msg += f" {self.monitor}[" + ";".join([o._get(self.monitor) for o in o_lst]) + "]"
+            msg += " (best:%.4f%s)" % (self.best, flag)
+
+            keys = reduce(lambda x, o: x | set(o.data.keys()), o_lst, set())
+            keys = sorted(list(filter(lambda x: x != self.monitor, keys)))
+
+            for k in keys:
+                msg += f" {k}[" + ";".join([o._get(k) for o in o_lst]) + "]"
+
+            self.log.info(msg)
+            self.log.flush()
+
+        # share improved condition with other nodes
+        if self.ddp:
+            improved = torch.tensor([improved], device="cuda")
+            dist.broadcast(improved, 0)
+
+        return improved
+
+    @property
+    def _is_eval_stage(self):
+        return self.valid_per_steps is not None and (self.epoch % self.valid_per_steps == 0 or self.args.debug)
 
     @torch.no_grad()
-    def evaluation(self, o1, o2, is_test=False):
-        self.step_sched(o2[self.monitor], is_on_epoch=True)
+    def stage_eval(self, o_train):
+        o_valid = self.valid_epoch(self.dl_valid)
+        improved = self.evaluation(o_valid, o_train)
 
-        prefix = "Test-" if is_test else ""
-        msg = f"{prefix}Epoch[%03d/%03d]" % (self.epoch, self.n_steps)
-        msg += " %s[%.4f;%.4f]" % (self.monitor, o1[self.monitor], o2[self.monitor])
-        for k in sorted(list(set(o1.data.keys()) | set(o2.data.keys()))):
-            if k == self.monitor:
-                continue
-
-            if k in o1.data and k in o2.data:
-                msg += " %s[%.4f;%.4f]" % (k, o1[k], o2[k])
-            elif k in o2.data:
-                msg += " %s[-;%.4f]" % (k, o2[k])
-            else:
-                msg += " %s[%.4f;-]" % (k, o1[k])
-        self.log.info(msg)
-        self.log.flush()
+        if improved:
+            self.sample()
 
     def fit(self):
         o_train = utils.AverageMeters()
-        with tqdm(total=self.n_steps, ncols=150, file=sys.stdout, disable=not self.rankzero, desc="Step") as t:
+        with tqdm(total=self.args.epochs, ncols=150, file=sys.stdout, disable=not self.rankzero, desc="Step") as t:
             self.model_optim.train()
-            for self.epoch, batch in enumerate(utils.infinite_dataloader(self.dl_train), 1):
+            for self.epoch, batch in enumerate(infinite_dataloader(self.dl_train), 1):
                 self.train_batch(batch, o_train)
                 t.set_postfix_str(o_train.to_msg())
 
-                if self.save_per_steps is not None and (self.epoch % self.save_per_steps == 0 or self.args.debug):
-                    if self.rankzero:
-                        self.save(self.args.exp_path / "best_step{:06d}.pth".format(self.epoch))
-                        saved_files = sorted(list(self.args.exp_path.glob("best_step*.pth")))
-                        if len(saved_files) > self.num_saves:
-                            to_deletes = saved_files[: len(saved_files) - self.num_saves]
-                            for to_delete in to_deletes:
-                                utils.try_remove_file(str(to_delete))
-
-                if self.valid_per_steps is not None and (self.epoch % self.valid_per_steps == 0 or self.args.debug):
-                    with torch.no_grad():
-                        self.model_optim.eval()
-                        o_valid = self.valid_epoch(self.dl_valid, n_iter=self.n_steps_valid)
-                        self.evaluation(o_train, o_valid)
-                        self.model_optim.train()
+                if self._is_eval_stage:
+                    self.model_optim.eval()
+                    self.stage_eval(o_train)
+                    self.model_optim.train()
                     o_train = utils.AverageMeters()
-
-                if self.test_per_steps is not None and (self.epoch % self.test_per_steps == 0 or self.args.debug):
-                    with torch.no_grad():
-                        self.model_optim.eval()
-                        o_test = self.test_epoch(self.dl_test, "Test", n_iter=self.n_steps_test)
-                        self.evaluation(o_train, o_test, is_test=True)
-                        self.model_optim.train()
-                    o_train = utils.AverageMeters()
-
-                if self.sample_per_steps is not None and (self.epoch % self.sample_per_steps == 0 or self.args.debug):
-                    with torch.no_grad():
-                        self.model_optim.eval()
-                        self.sample()
-                        self.model_optim.train()
 
                 t.update()
+
                 if self.args.debug and self.epoch >= 2:
                     break
-                if self.epoch >= self.n_steps:
+                if self.epoch >= self.args.epochs:
                     break
 
 
@@ -597,12 +575,41 @@ class StepTrainerEMA(StepTrainer):
         super().__init__(*args, **kwargs)
         self.ema_decay = ema_decay
 
+        self._ema_state = False
+
+    @contextmanager
+    def ema_state(self, activate=True):
+        previous = self._ema_state
+        self._ema_state = activate
+        yield
+        self._ema_state = previous
+
     def build_network(self):
         super().build_network()
-        self.model_ema = deepcopy(self.model)
-        self.model_ema.load_state_dict(self.model.state_dict())
+
+        self.model_ema = deepcopy(self.model_src)
+        self.model_ema.load_state_dict(self.model_src.state_dict())
         self.model_ema.requires_grad_(False)
 
     def on_train_batch_end(self, s):
         super().on_train_batch_end(s)
-        ema(self.model, self.model_ema, self.ema_decay)
+        ema(self.model_src, self.model_ema, self.ema_decay)
+
+    def save(self, out_path):
+        data = {
+            "optim": self.optim.state_dict(),
+            "model": self.model_src.state_dict(),
+            "model_ema": self.model_ema.state_dict(),
+        }
+        torch.save(data, str(out_path))
+
+    @torch.no_grad()
+    def stage_eval(self, o_train):
+        o_valid = self.valid_epoch(self.dl_valid)
+        with self.ema_state():
+            o_valid_ema = self.valid_epoch(self.dl_valid)
+        improved = self.evaluation(o_valid, o_valid_ema, o_train)
+
+        if improved:
+            self.stage_save()
+            self.sample()

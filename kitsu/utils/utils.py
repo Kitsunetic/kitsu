@@ -60,6 +60,12 @@ class AverageMeters:
         for k, v in g.items():
             self.data[k].update(v, n)
 
+    def _get(self, k):
+        if k in self.data:
+            return f"{self.data[k]():.4f}"
+        else:
+            return "_"
+
     def to_msg(self, format="%s:%.4f"):
         msgs = []
         for k, v in self.data.items():
