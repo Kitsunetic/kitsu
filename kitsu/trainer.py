@@ -567,7 +567,7 @@ class StepTrainer(BaseTrainer):
                 pbar.set_postfix_str(o_train.to_msg())
 
                 if self._is_eval_stage:
-                    pbar.clear()
+                    print()
                     self.model_optim.eval()
                     self.stage_eval(o_train)
                     self.model_optim.train()
