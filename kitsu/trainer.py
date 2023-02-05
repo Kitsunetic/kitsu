@@ -6,7 +6,9 @@ from collections import OrderedDict
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import reduce
-from typing import List, Sequence, Tuple
+from os import PathLike
+from pathlib import Path
+from typing import Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 import torch
@@ -41,7 +43,7 @@ class BasePreprocessor(metaclass=ABCMeta):
 
     def batch_to_device(self, batch):
         out = []
-        if isinstance(batch, list):
+        if isinstance(batch, (list, tuple)):
             for x in batch:
                 x = self._to(x, self.device)
                 out.append(x)
@@ -152,8 +154,13 @@ class BaseTrainer(BaseWorker):
 
         self.best = math.inf if self.small_is_better else -math.inf
         self.best_epoch = -1
+        self.epoch = 1
 
         self.build_network()
+        if "ckpt" in args and args.ckpt:
+            self.log.info("Load checkpoint:", args.ckpt)
+            ckpt = torch.load(args.ckpt, map_location="cpu")
+            self.load_checkpoint(ckpt)
         self.build_dataset()
         self.build_sample_idx()
         self.build_preprocessor()
@@ -194,6 +201,14 @@ class BaseTrainer(BaseWorker):
         # self.log.info(self.model)
         self.log.info("Model Params: %.2fM" % (self.model_params / 1e6))
 
+    def load_checkpoint(self, ckpt: PathLike):
+        if "model" in ckpt:
+            self.model.load_state_dict(ckpt["model"])
+        if "optim" in ckpt:
+            self.optim.load_state_dict(ckpt["optim"])
+        if "epoch" in ckpt:
+            self.epoch = ckpt["epoch"]
+
     def build_dataset(self):
         dls: Sequence[Dataset] = utils.instantiate_from_config(self.args.dataset)
         if len(dls) == 3:
@@ -217,6 +232,7 @@ class BaseTrainer(BaseWorker):
         data = {
             "optim": self.optim.state_dict(),
             "model": self.model_src.state_dict(),
+            "epoch": self.epoch,
         }
         torch.save(data, str(out_path))
 
@@ -235,6 +251,12 @@ class BaseTrainer(BaseWorker):
                 model_size += param.data.nelement()
         return model_size
 
+    def on_train_batch_start(self):
+        pass
+
+    def on_valid_batch_start(self):
+        pass
+
     def on_train_batch_end(self, s):
         pass
 
@@ -249,6 +271,8 @@ class BaseTrainer(BaseWorker):
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
             t = tqdm(total=len(dl.dataset), ncols=150, file=sys.stdout, desc=desc, leave=True)
         for batch in dl:
+            self.on_train_batch_start()
+
             s = self.preprocessor(batch, augmentation=True)
             with autocast(self.mixed_precision):
                 self.step(s)
@@ -301,6 +325,8 @@ class BaseTrainer(BaseWorker):
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
             t = tqdm(total=len(dl.dataset), ncols=150, file=sys.stdout, desc=desc, leave=True)
         for batch in dl:
+            self.on_valid_batch_start()
+
             s = self.preprocessor(batch, augmentation=False)
             self.step(s)
 
@@ -383,7 +409,7 @@ class BaseTrainer(BaseWorker):
             self.sample()
 
     def fit(self):
-        for self.epoch in range(1, self.args.epochs + 1):
+        for self.epoch in range(self.epoch, self.args.epochs + 1):
             self.fit_loop()
 
     def sample(self):
@@ -420,6 +446,11 @@ class BaseTrainerEMA(BaseTrainer):
         self.model_ema.load_state_dict(self.model_src.state_dict())
         self.model_ema.eval().requires_grad_(False)
 
+    def load_checkpoint(self, ckpt):
+        super().load_checkpoint(ckpt)
+        if "model_ema" in ckpt:
+            self.model_ema.load_state_dict(ckpt["model_ema"])
+
     def on_train_batch_end(self, s):
         super().on_train_batch_end(s)
         ema(self.model_src, self.model_ema, self.ema_decay)
@@ -429,6 +460,7 @@ class BaseTrainerEMA(BaseTrainer):
             "optim": self.optim.state_dict(),
             "model": self.model_src.state_dict(),
             "model_ema": self.model_ema.state_dict(),
+            "epoch": self.epoch,
         }
         torch.save(data, str(out_path))
 
@@ -445,6 +477,8 @@ class StepTrainer(BaseTrainer):
         self.valid_per_steps = valid_per_steps
 
     def train_batch(self, batch, o: utils.AverageMeters):
+        self.on_train_batch_start()
+
         s = self.preprocessor(batch, augmentation=True)
         with autocast(self.mixed_precision):
             self.step(s)
@@ -567,7 +601,7 @@ class StepTrainer(BaseTrainer):
                 pbar.set_postfix_str(o_train.to_msg())
 
                 if self._is_eval_stage:
-                    print()
+                    # print("\n")
                     self.model_optim.eval()
                     self.stage_eval(o_train)
                     self.model_optim.train()
@@ -602,6 +636,11 @@ class StepTrainerEMA(StepTrainer):
         self.model_ema.load_state_dict(self.model_src.state_dict())
         self.model_ema.requires_grad_(False)
 
+    def load_checkpoint(self, ckpt):
+        super().load_checkpoint(ckpt)
+        if "model_ema" in ckpt:
+            self.model_ema.load_state_dict(ckpt["model_ema"])
+
     def on_train_batch_end(self, s):
         super().on_train_batch_end(s)
         ema(self.model_src, self.model_ema, self.ema_decay)
@@ -611,6 +650,7 @@ class StepTrainerEMA(StepTrainer):
             "optim": self.optim.state_dict(),
             "model": self.model_src.state_dict(),
             "model_ema": self.model_ema.state_dict(),
+            "epoch": self.epoch,
         }
         torch.save(data, str(out_path))
 
@@ -622,5 +662,4 @@ class StepTrainerEMA(StepTrainer):
         improved = self.evaluation(o_valid, o_valid_ema, o_train)
 
         if improved:
-            self.stage_save()
             self.sample()
