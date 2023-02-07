@@ -41,6 +41,17 @@ class BasePreprocessor(metaclass=ABCMeta):
             x = [BasePreprocessor._to(item, device) for item in x]
         return x
 
+    def to(self, *xs):
+        ys = []
+        for x in xs:
+            y = self._to(x, self.device)
+            ys.append(y)
+            
+        if len(ys)==1:
+            return ys[0]
+        else:
+            return ys
+
     def batch_to_device(self, batch):
         out = []
         if isinstance(batch, (list, tuple)):
@@ -601,7 +612,6 @@ class StepTrainer(BaseTrainer):
                 pbar.set_postfix_str(o_train.to_msg())
 
                 if self._is_eval_stage:
-                    # print("\n")
                     self.model_optim.eval()
                     self.stage_eval(o_train)
                     self.model_optim.train()
