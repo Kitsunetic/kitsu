@@ -31,37 +31,35 @@ class BasePreprocessor(metaclass=ABCMeta):
     def __init__(self, device) -> None:
         self.device = device
 
-    @staticmethod
-    def _to(x, device):
-        if isinstance(x, torch.Tensor):
-            x = x.to(device, non_blocking=True)
-        elif isinstance(x, np.ndarray):
-            x = torch.from_numpy(x).to(device, non_blocking=True)
-        elif isinstance(x, List):
-            x = [BasePreprocessor._to(item, device) for item in x]
-        return x
-
     def to(self, *xs):
         ys = []
         for x in xs:
             y = self._to(x, self.device)
             ys.append(y)
-            
-        if len(ys)==1:
+
+        if len(ys) == 1:
             return ys[0]
         else:
             return ys
 
+    def _to(self, x):
+        if isinstance(x, torch.Tensor):
+            x = x.to(self.device, non_blocking=True)
+        elif isinstance(x, np.ndarray):
+            x = torch.from_numpy(x).to(self.device, non_blocking=True)
+        elif isinstance(x, (list, tuple, dict)):
+            x = self.batch_to_device(x)
+        return x
+
     def batch_to_device(self, batch):
-        out = []
-        if isinstance(batch, (list, tuple)):
-            for x in batch:
-                x = self._to(x, self.device)
-                out.append(x)
-            return out
+        if isinstance(batch, list):
+            return [self._to(x) for x in batch]
+        elif isinstance(batch, tuple):
+            return (self._to(x) for x in batch)
+        elif isinstance(batch, dict):
+            return {k: self._to(batch[k]) for k in batch}
         else:
-            x = self._to(batch, self.device)
-            return x
+            return self._to(batch)
 
     @abstractmethod
     def __call__(self, batch, augmentation=False):
@@ -612,6 +610,7 @@ class StepTrainer(BaseTrainer):
                 pbar.set_postfix_str(o_train.to_msg())
 
                 if self._is_eval_stage:
+                    print(flush=True)
                     self.model_optim.eval()
                     self.stage_eval(o_train)
                     self.model_optim.train()
