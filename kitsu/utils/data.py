@@ -12,7 +12,7 @@ def first(xs):
         yield x, i == 0
 
 
-def build_dataloaders(batch_size: int, num_workers: int, *dss: Sequence[Dataset], ddp=None, **kwargs) -> Sequence[DataLoader]:
+def build_dataloaders(batch_size: int, num_workers: int, ds: Dataset, ddp=None, shuffle=False, **kwargs) -> Sequence[DataLoader]:
     dl_kwargs = dict(batch_size=batch_size, num_workers=num_workers, pin_memory=True, persistent_workers=num_workers > 0)
     dl_kwargs.update(kwargs)
 
@@ -20,15 +20,12 @@ def build_dataloaders(batch_size: int, num_workers: int, *dss: Sequence[Dataset]
         ddp = dist.is_initialized() and dist.get_world_size() > 1
 
     if ddp:
-        samplers = [DistributedSampler(ds, shuffle=shuffle) for ds, shuffle in first(dss)]
-        dls = [DataLoader(ds, sampler=sampler, **dl_kwargs) for ds, sampler in zip(dss, samplers)]
+        sampler = DistributedSampler(ds, shuffle=shuffle)
+        dl = DataLoader(ds, sampler=sampler, **dl_kwargs)
     else:
-        dls = [DataLoader(ds, shuffle=shuffle, **dl_kwargs) for ds, shuffle in first(dss)]
-
-    if len(dls) == 1:
-        return dls[0]
-    else:
-        return dls
+        dl = DataLoader(ds, shuffle=shuffle, **dl_kwargs)
+    
+    return dl
 
 
 class ChainDataset(Dataset):
