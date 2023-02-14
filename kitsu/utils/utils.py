@@ -111,7 +111,6 @@ def _parse_pyinstance_dict(params: dict):
 
     for p, v in params.items():
         if p == "__pyinstance__":
-            print(v)
             inst = instantiate_from_config(v)
             return inst
         elif isinstance(v, dict):
