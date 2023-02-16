@@ -569,7 +569,7 @@ class StepTrainer(BaseTrainer):
                 flag = "*"
                 improved = self.epoch > self.epochs_to_save or self.args.debug or not self.save_only_improved
 
-            msg = f"Epoch[%03d/%03d]" % (self.epoch, self.args.epochs)
+            msg = f"Step[%06d/%06d]" % (self.epoch, self.args.epochs)
             msg += f" {self.monitor}[" + ";".join([o._get(self.monitor) for o in o_lst]) + "]"
             msg += " (best:%.4f%s)" % (self.best, flag)
 
