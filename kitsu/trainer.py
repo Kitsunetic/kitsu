@@ -725,7 +725,7 @@ class StepTrainerEMA(StepTrainer):
 
         with self.ema_state():
             o_valid_ema = self.valid_epoch(self.dl_valid)
-            improved = self.evaluation(o_valid_ema, o_train)
+            improved = self.evaluation_ema(o_valid_ema, o_train)
 
         if improved:
             self.sample()
