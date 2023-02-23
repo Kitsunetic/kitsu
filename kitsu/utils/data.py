@@ -1,6 +1,7 @@
 from math import inf
 from typing import Sequence
 
+import torch as th
 import torch.distributed as dist
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
 
@@ -12,8 +13,26 @@ def first(xs):
         yield x, i == 0
 
 
-def build_dataloaders(batch_size: int, num_workers: int, ds: Dataset, ddp=None, shuffle=False, **kwargs) -> Sequence[DataLoader]:
-    dl_kwargs = dict(batch_size=batch_size, num_workers=num_workers, pin_memory=True, persistent_workers=num_workers > 0)
+def build_dataloaders(
+    batch_size: int,
+    num_workers: int,
+    ds: Dataset,
+    ddp=None,
+    shuffle=False,
+    pin_memory=None,
+    persistent_workers=None,
+    **kwargs,
+) -> Sequence[DataLoader]:
+    if pin_memory is None:
+        pin_memory = th.cuda.is_available()
+    if persistent_workers is None:
+        persistent_workers = num_workers > 0
+    dl_kwargs = dict(
+        batch_size=batch_size,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=persistent_workers,
+    )
     dl_kwargs.update(kwargs)
 
     if ddp is None:
@@ -24,7 +43,7 @@ def build_dataloaders(batch_size: int, num_workers: int, ds: Dataset, ddp=None, 
         dl = DataLoader(ds, sampler=sampler, **dl_kwargs)
     else:
         dl = DataLoader(ds, shuffle=shuffle, **dl_kwargs)
-    
+
     return dl
 
 
