@@ -362,22 +362,20 @@ class BaseTrainer(BaseWorker):
         improved = False
         if self.rankzero:  # scores are not calculated in other nodes
             flag = ""
-            if (
-                (self.small_is_better and o_lst[0][self.monitor] < self.best)
-                or (not self.small_is_better and o_lst[0][self.monitor] > self.best)
-                or (
-                    self.sample_at_least_per_epochs is not None
-                    and (self.epoch - self.best_epoch) >= self.sample_at_least_per_epochs
-                )
-            ):
-                if self.small_is_better:
-                    if self.best > o_lst[0][self.monitor]:
-                        self.best = o_lst[0][self.monitor]
-                        improved = True
-                else:
-                    if self.best < o_lst[0][self.monitor]:
-                        self.best = max(self.best, o_lst[0][self.monitor])
-                        improved = True
+            _c1 = self.small_is_better and o_lst[0][self.monitor] < self.best
+            _c2 = not self.small_is_better and o_lst[0][self.monitor] > self.best
+            _c3 = (
+                self.sample_at_least_per_epochs is not None
+                and (self.epoch - self.best_epoch) >= self.sample_at_least_per_epochs
+            )
+
+            if _c1 or _c2 or _c3:
+                if _c1:
+                    self.best = o_lst[0][self.monitor]
+                elif _c2:
+                    self.best = max(self.best, o_lst[0][self.monitor])
+
+                improved = True
 
                 self.best_epoch = self.epoch
                 self.save(self.args.exp_path / "best_ep{:04d}.pth".format(self.epoch))
@@ -541,22 +539,20 @@ class StepTrainer(BaseTrainer):
         improved = False
         if self.rankzero:  # scores are not calculated in other nodes
             flag = ""
-            if (
-                (self.small_is_better and o_lst[0][self.monitor] < self.best)
-                or (not self.small_is_better and o_lst[0][self.monitor] > self.best)
-                or (
-                    self.sample_at_least_per_epochs is not None
-                    and (self.epoch - self.best_epoch) >= self.sample_at_least_per_epochs
-                )
-            ):
-                if self.small_is_better:
-                    if self.best > o_lst[0][self.monitor]:
-                        self.best = o_lst[0][self.monitor]
-                        improved = True
-                else:
-                    if self.best < o_lst[0][self.monitor]:
-                        self.best = max(self.best, o_lst[0][self.monitor])
-                        improved = True
+            _c1 = self.small_is_better and o_lst[0][self.monitor] < self.best
+            _c2 = not self.small_is_better and o_lst[0][self.monitor] > self.best
+            _c3 = (
+                self.sample_at_least_per_epochs is not None
+                and (self.epoch - self.best_epoch) >= self.sample_at_least_per_epochs
+            )
+
+            if _c1 or _c2 or _c3:
+                if _c1:
+                    self.best = o_lst[0][self.monitor]
+                elif _c2:
+                    self.best = max(self.best, o_lst[0][self.monitor])
+
+                improved = True
 
                 self.best_epoch = self.epoch
                 self.save(self.args.exp_path / "best_ep{:06d}.pth".format(self.epoch))
@@ -631,6 +627,7 @@ class StepTrainerEMA(StepTrainer):
 
         self._ema_state = False
         self.best_ema_epoch = -1
+        self.best_ema = math.inf if self.small_is_better else -math.inf
 
     @contextmanager
     def ema_state(self, activate=True):
@@ -670,22 +667,20 @@ class StepTrainerEMA(StepTrainer):
         improved = False
         if self.rankzero:  # scores are not calculated in other nodes
             flag = ""
-            if (
-                (self.small_is_better and o_lst[0][self.monitor] < self.best_ema)
-                or (not self.small_is_better and o_lst[0][self.monitor] > self.best_ema)
-                or (
-                    self.sample_at_least_per_epochs is not None
-                    and (self.epoch - self.best_ema_epoch) >= self.sample_at_least_per_epochs
-                )
-            ):
-                if self.small_is_better:
-                    if self.best_ema > o_lst[0][self.monitor]:
-                        self.best_ema = o_lst[0][self.monitor]
-                        improved = True
-                else:
-                    if self.best_ema < o_lst[0][self.monitor]:
-                        self.best_ema = max(self.best_ema, o_lst[0][self.monitor])
-                        improved = True
+            _c1 = self.small_is_better and o_lst[0][self.monitor] < self.best_ema
+            _c2 = not self.small_is_better and o_lst[0][self.monitor] > self.best_ema
+            _c3 = (
+                self.sample_at_least_per_epochs is not None
+                and (self.epoch - self.best_ema_epoch) >= self.sample_at_least_per_epochs
+            )
+
+            if _c1 or _c2 or _c3:
+                if _c1:
+                    self.best_ema = o_lst[0][self.monitor]
+                elif _c2:
+                    self.best_ema = max(self.best_ema, o_lst[0][self.monitor])
+
+                improved = True
 
                 self.best_ema_epoch = self.epoch
                 self.save(self.args.exp_path / "best_ema_ep{:06d}.pth".format(self.epoch))
@@ -718,14 +713,18 @@ class StepTrainerEMA(StepTrainer):
 
         return improved
 
+    def sample(self, is_ema: bool):
+        pass
+
     @torch.no_grad()
     def stage_eval(self, o_train):
         o_valid = self.valid_epoch(self.dl_valid)
         improved = self.evaluation(o_valid, o_train)
+        if improved:
+            self.sample(is_ema=False)
 
         with self.ema_state():
             o_valid_ema = self.valid_epoch(self.dl_valid)
             improved = self.evaluation_ema(o_valid_ema, o_train)
-
-        if improved:
-            self.sample()
+            if improved:
+                self.sample(is_ema=True)
