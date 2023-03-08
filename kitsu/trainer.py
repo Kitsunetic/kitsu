@@ -357,7 +357,7 @@ class BaseTrainer(BaseWorker):
 
     @torch.no_grad()
     def evaluation(self, *o_lst):
-        assert self.monitor in o2.data, f"No monitor {self.monitor} in validation results: {list(o2.data.keys())}"
+        assert self.monitor in o_lst[0].data, f"No monitor {self.monitor} in validation results: {list(o_lst[0].data.keys())}"
 
         self.step_sched(o_lst[0][self.monitor], is_on_epoch=True)
 
