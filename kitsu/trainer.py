@@ -26,6 +26,8 @@ from kitsu.utils.data import infinite_dataloader
 from kitsu.utils.ema import ema
 from kitsu.utils.optim import ESAM, SAM
 
+TQDM_NCOLS = 128
+
 
 class BasePreprocessor(metaclass=ABCMeta):
     def __init__(self, device) -> None:
@@ -278,7 +280,7 @@ class BaseTrainer(BaseWorker):
 
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
-            t = tqdm(total=len(dl.dataset), ncols=150, file=sys.stdout, desc=desc, leave=True)
+            t = tqdm(total=len(dl.dataset), ncols=TQDM_NCOLS, file=sys.stdout, desc=desc, leave=True)
         for batch in dl:
             self.on_train_batch_start()
 
@@ -332,7 +334,7 @@ class BaseTrainer(BaseWorker):
 
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
-            t = tqdm(total=len(dl.dataset), ncols=150, file=sys.stdout, desc=desc, leave=True)
+            t = tqdm(total=len(dl.dataset), ncols=TQDM_NCOLS, file=sys.stdout, desc=desc, leave=True)
         for batch in dl:
             self.on_valid_batch_start()
 
@@ -515,7 +517,9 @@ class StepTrainer(BaseTrainer):
         o = utils.AverageMeters()
         desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
 
-        with tqdm(total=len(dl.dataset), ncols=150, file=sys.stdout, desc=desc, leave=False, disable=not self.rankzero) as pbar:
+        with tqdm(
+            total=len(dl.dataset), ncols=TQDM_NCOLS, file=sys.stdout, desc=desc, leave=False, disable=not self.rankzero
+        ) as pbar:
             for batch in dl:
                 s = self.preprocessor(batch, augmentation=False)
                 self.step(s)
@@ -599,7 +603,7 @@ class StepTrainer(BaseTrainer):
 
     def fit(self):
         o_train = utils.AverageMeters()
-        with tqdm(total=self.args.epochs, ncols=150, file=sys.stdout, disable=not self.rankzero, desc="Step") as pbar:
+        with tqdm(total=self.args.epochs, ncols=TQDM_NCOLS, file=sys.stdout, disable=not self.rankzero, desc="Step") as pbar:
             self.model_optim.train()
             for self.epoch, batch in enumerate(infinite_dataloader(self.dl_train), 1):
                 self.train_batch(batch, o_train)
