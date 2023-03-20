@@ -1,5 +1,5 @@
 from math import inf
-from typing import Sequence
+from typing import Sequence, Union
 
 import torch as th
 import torch.distributed as dist
@@ -22,7 +22,7 @@ def build_dataloaders(
     pin_memory=None,
     persistent_workers=None,
     **kwargs,
-) -> Sequence[DataLoader]:
+) -> Union[DataLoader, Sequence[DataLoader]]:
     if pin_memory is None:
         pin_memory = th.cuda.is_available()
     if persistent_workers is None:
