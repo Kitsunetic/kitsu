@@ -512,6 +512,8 @@ class StepTrainer(BaseTrainer):
         self.on_train_batch_end(s)
         self.step_sched(is_on_batch=True)
 
+        return s
+
     @torch.no_grad()
     def valid_epoch(self, dl: "DataLoader", prefix="Valid"):
         o = utils.AverageMeters()
