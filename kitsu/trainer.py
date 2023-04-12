@@ -400,6 +400,7 @@ class BaseTrainer(BaseWorker):
             for k in keys:
                 msg += f" {k}[" + ";".join([o._get(k) for o in o_lst]) + "]"
 
+            print(flush=True)
             self.log.info(msg)
             self.log.flush()
 
@@ -519,9 +520,7 @@ class StepTrainer(BaseTrainer):
         o = utils.AverageMeters()
         desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
 
-        with tqdm(
-            total=len(dl.dataset), ncols=TQDM_NCOLS, file=sys.stdout, desc=desc, leave=False, disable=not self.rankzero
-        ) as pbar:
+        with tqdm(total=len(dl.dataset), ncols=TQDM_NCOLS, file=sys.stdout, desc=desc, disable=not self.rankzero) as pbar:
             for batch in dl:
                 s = self.preprocessor(batch, augmentation=False)
                 self.step(s)
@@ -581,6 +580,7 @@ class StepTrainer(BaseTrainer):
             for k in keys:
                 msg += f" {k}[" + ";".join([o._get(k) for o in o_lst]) + "]"
 
+            print(flush=True)
             self.log.info(msg)
             self.log.flush()
 
