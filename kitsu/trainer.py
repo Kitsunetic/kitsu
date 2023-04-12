@@ -608,6 +608,7 @@ class StepTrainer(BaseTrainer):
         with tqdm(total=self.args.epochs, ncols=TQDM_NCOLS, file=sys.stdout, disable=not self.rankzero, desc="Step") as pbar:
             self.model_optim.train()
             for self.epoch, batch in enumerate(infinite_dataloader(self.dl_train), 1):
+                self.model_optim.train()
                 self.train_batch(batch, o_train)
                 pbar.set_postfix_str(o_train.to_msg())
 
@@ -615,7 +616,6 @@ class StepTrainer(BaseTrainer):
                     print(flush=True)
                     self.model_optim.eval()
                     self.stage_eval(o_train)
-                    self.model_optim.train()
                     o_train = utils.AverageMeters()
 
                 pbar.update()
