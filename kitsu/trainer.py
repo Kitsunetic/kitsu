@@ -26,8 +26,6 @@ from kitsu.utils.data import infinite_dataloader
 from kitsu.utils.ema import ema
 from kitsu.utils.optim import ESAM, SAM
 
-TQDM_NCOLS = 128
-
 
 class BasePreprocessor(metaclass=ABCMeta):
     def __init__(self, device) -> None:
@@ -140,6 +138,7 @@ class BaseTrainer(BaseWorker):
         use_sam: bool = False,  # Sharpness-Aware Minimization
         use_esam: bool = False,  # Efficient Sharpness-aware Minimization
         save_only_improved: bool = True,
+        tqdm_ncols: int = 128,
     ) -> None:
         assert not (mixed_precision and (use_sam or use_esam))
         # assert not (use_sam and use_esam)
@@ -159,6 +158,7 @@ class BaseTrainer(BaseWorker):
         self.use_sam = use_sam
         self.use_esam = use_esam
         self.save_only_improved = save_only_improved
+        self.tqdm_ncols = tqdm_ncols
 
         if self.mixed_precision:
             self.scaler = GradScaler()
@@ -184,18 +184,16 @@ class BaseTrainer(BaseWorker):
     def model(self):
         return self.model_src
 
-    def build_network(self):
-        self.model_src = utils.instantiate_from_config(self.args.model).cuda()
+    def _make_distributed_model(self, model: nn.Module):
         if self.ddp:
             if self.use_sync_bn:
-                self.model_src = nn.SyncBatchNorm.convert_sync_batchnorm(self.model_src)
-            self.model_optim = DDP(
-                self.model_src,
-                device_ids=[self.args.gpu],
-                find_unused_parameters=self.find_unused_parameters,
-            ).cuda()
-        else:
-            self.model_optim = self.model_src
+                model = nn.SyncBatchNorm.convert_sync_batchnorm(model).cuda()
+            model = DDP(model, device_ids=[self.args.gpu], find_unused_parameters=self.find_unused_parameters).cuda()
+        return model
+
+    def build_network(self):
+        self.model_src = utils.instantiate_from_config(self.args.model).cuda()
+        self.model_optim = self._make_distributed_model(self.model_src)
 
         self.optim = utils.instantiate_from_config(self.args.optim, self.model_optim.parameters())
 
@@ -280,7 +278,7 @@ class BaseTrainer(BaseWorker):
 
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
-            t = tqdm(total=len(dl.dataset), ncols=TQDM_NCOLS, file=sys.stdout, desc=desc, leave=True)
+            t = tqdm(total=len(dl.dataset), ncols=self.tqdm_ncols, file=sys.stdout, desc=desc, leave=True)
         for batch in dl:
             self.on_train_batch_start()
 
@@ -334,7 +332,7 @@ class BaseTrainer(BaseWorker):
 
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
-            t = tqdm(total=len(dl.dataset), ncols=TQDM_NCOLS, file=sys.stdout, desc=desc, leave=True)
+            t = tqdm(total=len(dl.dataset), ncols=self.tqdm_ncols, file=sys.stdout, desc=desc, leave=True)
         for batch in dl:
             self.on_valid_batch_start()
 
@@ -520,7 +518,7 @@ class StepTrainer(BaseTrainer):
         o = utils.AverageMeters()
         desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
 
-        with tqdm(total=len(dl.dataset), ncols=TQDM_NCOLS, file=sys.stdout, desc=desc, disable=not self.rankzero) as pbar:
+        with tqdm(total=len(dl.dataset), ncols=self.tqdm_ncols, file=sys.stdout, desc=desc, disable=not self.rankzero) as pbar:
             for batch in dl:
                 s = self.preprocessor(batch, augmentation=False)
                 self.step(s)
@@ -605,7 +603,9 @@ class StepTrainer(BaseTrainer):
 
     def fit(self):
         o_train = utils.AverageMeters()
-        with tqdm(total=self.args.epochs, ncols=TQDM_NCOLS, file=sys.stdout, disable=not self.rankzero, desc="Step") as pbar:
+        with tqdm(
+            total=self.args.epochs, ncols=self.tqdm_ncols, file=sys.stdout, disable=not self.rankzero, desc="Step"
+        ) as pbar:
             self.model_optim.train()
             for self.epoch, batch in enumerate(infinite_dataloader(self.dl_train), 1):
                 self.model_optim.train()
