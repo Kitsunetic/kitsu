@@ -91,6 +91,8 @@ class BaseWorker(metaclass=ABCMeta):
         return self.args.log
 
     def collect_log(self, s, prefix="", postfix=""):
+        assert not s.log.loss.isnan().any(), "nan loss occurred"
+
         keys = list(s.log.keys())
         if self.ddp:
             g = s.log.loss.new_tensor([self._t2f(s.log[k]) for k in keys], dtype=torch.float) * s.n
