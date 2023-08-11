@@ -95,7 +95,9 @@ def get_config(argv=None):
     args.outdir = opt.outdir
 
     n = datetime.now()
-    timestr = f"{n.year%100}{n.month:02d}{n.day:02d}_{n.hour:02d}{n.minute:02d}{n.second:02d}"
+    # timestr = f"{n.year%100}{n.month:02d}{n.day:02d}_{n.hour:02d}{n.minute:02d}{n.second:02d}"
+    timestr = f"{n.year%100}{n.month:02d}{n.day:02d}_{n.hour:02d}{n.minute:02d}"
+    # timestr = f"{n.year%100}{n.month:02d}{n.day:02d}"
     timestr += "_" + Path(opt.config_file).stem
     if args.memo:
         timestr += "_%s" % args.memo

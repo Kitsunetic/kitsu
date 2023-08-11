@@ -21,6 +21,7 @@ __all__ = [
     "get_obj_from_str",
     "BlackHole",
     "tensor_to_image",
+    "safe_to_tensor",
 ]
 
 
@@ -213,4 +214,18 @@ def tensor_to_image(x: Tensor, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.
     if xdim == 3:
         x = x[0]
 
+    return x
+
+
+def safe_to_tensor(x, device="cpu"):
+    non_blocking = device != "cpu"
+
+    if isinstance(x, np.ndarray):
+        return th.from_numpy(x).to(device, non_blocking=non_blocking)
+    elif isinstance(x, th.Tensor):
+        return x.to(device, non_blocking=non_blocking)
+    elif isinstance(x, (list, tuple)):
+        return th.tensor(x, device=device)
+    elif isinstance(x, dict):
+        return {k: safe_to_tensor(v, device=device) for k, v in x.items()}
     return x
