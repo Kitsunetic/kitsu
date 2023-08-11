@@ -296,3 +296,60 @@ def udf2mesh(udf, grad, b_max, b_min, resolution):
     v_all = v_all / (resolution - 1.0) * (b_max - b_min)[None, :] + b_min[None, :]
 
     return v_all, f_all
+
+
+def save_point_cloud(filename, vertices, colors=None):
+    """
+    Save a point cloud to a PLY file using open3d.
+
+    Parameters:
+    - filename: Name of the PLY file to save to.
+    - vertices: Nx3 numpy array of vertex positions.
+    - colors (optional): Nx3 numpy array of vertex colors in uint8 format (range [0, 255]).
+                         If None, only vertices are saved.
+    """
+    import open3d as o3d
+
+    if isinstance(vertices, torch.Tensor):
+        vertices = vertices.detach().cpu().numpy()
+
+    pcd = o3d.geometry.PointCloud()
+    pcd.points = o3d.utility.Vector3dVector(vertices)
+
+    if colors is not None:
+        if isinstance(colors, torch.Tensor):
+            colors = colors.detach().cpu().numpy()
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    o3d.io.write_point_cloud(filename, pcd)
+
+
+def save_mesh(filename, vertices, faces, colors=None):
+    """
+    Save a mesh to a PLY file using open3d.
+
+    Parameters:
+    - filename: Name of the PLY file to save to.
+    - vertices: Nx3 numpy array or torch.Tensor of vertex positions.
+    - faces: Mx3 numpy array or torch.Tensor of triangular indices.
+    - colors (optional): Nx3 numpy array or torch.Tensor of vertex colors in uint8 format (range [0, 255]).
+                         If None, only vertices and faces are saved.
+    """
+    import open3d as o3d
+
+    if isinstance(vertices, torch.Tensor):
+        vertices = vertices.detach().cpu().numpy()
+
+    if isinstance(faces, torch.Tensor):
+        faces = faces.detach().cpu().numpy()
+
+    mesh = o3d.geometry.TriangleMesh()
+    mesh.vertices = o3d.utility.Vector3dVector(vertices)
+    mesh.triangles = o3d.utility.Vector3iVector(faces)
+
+    if colors is not None:
+        if isinstance(colors, torch.Tensor):
+            colors = colors.detach().cpu().numpy()
+        mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+
+    o3d.io.write_triangle_mesh(filename, mesh)
