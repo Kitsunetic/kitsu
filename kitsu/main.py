@@ -1,11 +1,8 @@
 import os
-import sys
-
-os.chdir(os.path.dirname(sys.argv[0]))
 
 import torch.multiprocessing as mp
 
-os.environ["OMP_NUM_THREADS"] = str(min(16, mp.cpu_count()))
+# os.environ["OMP_NUM_THREADS"] = str(min(16, mp.cpu_count()))
 
 import torch
 import torch.distributed as dist
