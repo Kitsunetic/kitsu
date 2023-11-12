@@ -329,7 +329,7 @@ def save_point_cloud(filename, vertices, colors=None, normals=None):
     o3d.io.write_point_cloud(filename, pcd)
 
 
-def save_mesh(filename, vertices, faces, colors=None):
+def save_mesh(filename, vertices, faces, colors=None, normals=None):
     """
     Save a mesh to a PLY file using open3d.
 
@@ -356,5 +356,10 @@ def save_mesh(filename, vertices, faces, colors=None):
         if isinstance(colors, torch.Tensor):
             colors = colors.detach().cpu().numpy()
         mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+
+    if normals is not None:
+        if isinstance(normals, torch.Tensor):
+            normals = normals.detach().cpu().numpy()
+        mesh.vertex_normals = o3d.utility.Vector3dVector(normals)
 
     o3d.io.write_triangle_mesh(filename, mesh)
