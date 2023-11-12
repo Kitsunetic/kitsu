@@ -298,7 +298,7 @@ def udf2mesh(udf, grad, b_max, b_min, resolution):
     return v_all, f_all
 
 
-def save_point_cloud(filename, vertices, colors=None):
+def save_point_cloud(filename, vertices, colors=None, normals=None):
     """
     Save a point cloud to a PLY file using open3d.
 
@@ -320,6 +320,11 @@ def save_point_cloud(filename, vertices, colors=None):
         if isinstance(colors, torch.Tensor):
             colors = colors.detach().cpu().numpy()
         pcd.colors = o3d.utility.Vector3dVector(colors)
+
+    if normals is not None:
+        if isinstance(normals, torch.Tensor):
+            normals = normals.detach().cpu().numpy()
+        pcd.normals = o3d.utility.Vector3dVector(normals)
 
     o3d.io.write_point_cloud(filename, pcd)
 
