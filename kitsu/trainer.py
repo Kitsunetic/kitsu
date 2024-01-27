@@ -1,5 +1,5 @@
 import math
-import random
+import socket
 import sys
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
@@ -25,6 +25,7 @@ from kitsu.logger import CustomLogger
 from kitsu.utils.data import infinite_dataloader
 from kitsu.utils.ema import ema
 from kitsu.utils.optim import ESAM, SAM
+from kitsu.utils.system import get_system_info
 
 
 class BasePreprocessor(metaclass=ABCMeta):
@@ -169,18 +170,31 @@ class BaseTrainer(BaseWorker):
         self.best_epoch = -1
         self.epoch = 1
 
+        self.on_init_end()
         self.build_network()
         if "ckpt" in args and args.ckpt:
             self.log.info("Load checkpoint:", args.ckpt)
             ckpt = torch.load(args.ckpt, map_location="cpu")
             self.load_checkpoint(ckpt)
+
         self.build_dataset()
         self.build_sample_idx()
         self.build_preprocessor()
+        self.on_init_end()
 
         if self.args.debug:
             self.args.epochs = 2
             self.epochs_to_save = 0
+
+    def _log_system_info(self):
+        for k, v in get_system_info():
+            self.log.info(f"- {k:<20}: {v}")
+
+    def on_init_start(self):
+        self._log_system_info()
+
+    def on_init_end(self):
+        pass
 
     @property
     def model(self):
