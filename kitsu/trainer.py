@@ -35,7 +35,7 @@ class BasePreprocessor(metaclass=ABCMeta):
     def to(self, *xs):
         ys = []
         for x in xs:
-            y = self._to(x, self.device)
+            y = self._to(x)
             ys.append(y)
 
         if len(ys) == 1:
