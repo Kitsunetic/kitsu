@@ -12,6 +12,7 @@ from typing import Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 import torch
+import torch as th
 import torch.distributed as dist
 import torch.nn as nn
 from torch.cuda.amp.autocast_mode import autocast
@@ -142,6 +143,7 @@ class BaseTrainer(BaseWorker):
         use_esam: bool = False,  # Efficient Sharpness-aware Minimization
         save_only_improved: bool = True,
         tqdm_ncols: int = 128,
+        compile_model: bool = False,
     ) -> None:
         assert not (mixed_precision and (use_sam or use_esam))
         # assert not (use_sam and use_esam)
@@ -162,6 +164,7 @@ class BaseTrainer(BaseWorker):
         self.use_esam = use_esam
         self.save_only_improved = save_only_improved
         self.tqdm_ncols = tqdm_ncols
+        self.compile_model = compile_model
 
         if self.mixed_precision:
             self.scaler = GradScaler()
@@ -209,6 +212,15 @@ class BaseTrainer(BaseWorker):
 
     def build_network(self):
         self.model_src = utils.instantiate_from_config(self.args.model).cuda()
+        if self.compile_model:
+            assert (
+                int(str(th.__vesion__).strip().split(".")[0]) > 2
+            ), f"Model compilation is available only for torch>=2.0, but {th.__version__}"
+
+            self.log.info("Start to compile model, it takes minutes.")
+            # self.model_src = th.compile(self.model_src, mode="reduce-overhead")
+            self.model_src = th.compile(self.model_src)
+
         self.model_optim = self._make_distributed_model(self.model_src)
 
         self.optim = utils.instantiate_from_config(self.args.optim, self.model_optim.parameters())
