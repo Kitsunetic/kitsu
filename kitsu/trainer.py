@@ -144,8 +144,10 @@ class BaseTrainer(BaseWorker):
         save_only_improved: bool = True,
         tqdm_ncols: int = 128,
         compile_model: bool = False,
+        gradient_accumulation_steps: int = 1,
     ) -> None:
         assert not (mixed_precision and (use_sam or use_esam))
+        assert not (gradient_accumulation_steps and (use_sam or use_esam))
         # assert not (use_sam and use_esam)
 
         super().__init__(args)
@@ -165,6 +167,7 @@ class BaseTrainer(BaseWorker):
         self.save_only_improved = save_only_improved
         self.tqdm_ncols = tqdm_ncols
         self.compile_model = compile_model
+        self.gradient_accumulation_steps = gradient_accumulation_steps
 
         if self.mixed_precision:
             self.scaler = GradScaler()
@@ -303,6 +306,7 @@ class BaseTrainer(BaseWorker):
     def train_epoch(self, dl: "DataLoader", prefix="Train"):
         self.model_optim.train()
         o = utils.AverageMeters()
+        gradient_accumulation_cnt = 0  # only when gradient accumultation is on
 
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
@@ -316,11 +320,21 @@ class BaseTrainer(BaseWorker):
 
             if self.mixed_precision:
                 self.scaler.scale(s.log.loss).backward()
+
+                # gradient accumulation
+                if self.gradient_accumulation_steps > 1:
+                    if gradient_accumulation_cnt == self.gradient_accumulation_steps:
+                        gradient_accumulation_cnt = 0
+                        continue
+                    else:
+                        gradient_accumulation_cnt += 1
+
                 if self.clip_grad > 0:  # gradient clipping
                     self.scaler.unscale_(self.optim)
                     nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
                 self.scaler.step(self.optim)
                 self.scaler.update()
+                self.optim.zero_grad()
             else:
                 s.log.loss.backward()
                 if self.clip_grad > 0:  # gradient clipping
@@ -335,7 +349,7 @@ class BaseTrainer(BaseWorker):
                     self.optim.second_step(zero_grad=False)
                 else:
                     self.optim.step()
-            self.optim.zero_grad()
+                self.optim.zero_grad()
 
             self.step_sched(is_on_batch=True)
 
