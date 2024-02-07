@@ -20,6 +20,7 @@ from torch.cuda.amp.grad_scaler import GradScaler
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+from easydict import EasyDict
 
 from kitsu import utils
 from kitsu.logger import CustomLogger
@@ -65,7 +66,8 @@ class BasePreprocessor(metaclass=ABCMeta):
 
     @abstractmethod
     def __call__(self, batch, augmentation=False):
-        pass
+        s = EasyDict(log={})
+        return s
 
 
 class BaseWorker(metaclass=ABCMeta):
@@ -306,7 +308,7 @@ class BaseTrainer(BaseWorker):
     def train_epoch(self, dl: "DataLoader", prefix="Train"):
         self.model_optim.train()
         o = utils.AverageMeters()
-        gradient_accumulation_cnt = 0  # only when gradient accumultation is on
+        gradient_accumulation_cnt = 1  # only when gradient accumultation is on
 
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
@@ -315,6 +317,7 @@ class BaseTrainer(BaseWorker):
             self.on_train_batch_start()
 
             s = self.preprocessor(batch, augmentation=True)
+            s.do_param_update = True
             with autocast(self.mixed_precision):
                 self.step(s)
 
@@ -323,18 +326,18 @@ class BaseTrainer(BaseWorker):
 
                 # gradient accumulation
                 if self.gradient_accumulation_steps > 1:
-                    if gradient_accumulation_cnt == self.gradient_accumulation_steps:
-                        gradient_accumulation_cnt = 0
-                        continue
+                    if gradient_accumulation_cnt >= self.gradient_accumulation_steps:
+                        gradient_accumulation_cnt = 1
                     else:
-                        gradient_accumulation_cnt += 1
+                        s.do_param_update = False
 
-                if self.clip_grad > 0:  # gradient clipping
-                    self.scaler.unscale_(self.optim)
-                    nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
-                self.scaler.step(self.optim)
-                self.scaler.update()
-                self.optim.zero_grad()
+                if s.do_param_update:
+                    if self.clip_grad > 0:  # gradient clipping
+                        self.scaler.unscale_(self.optim)
+                        nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
+                    self.scaler.step(self.optim)
+                    self.scaler.update()
+                    self.optim.zero_grad()
             else:
                 s.log.loss.backward()
                 if self.clip_grad > 0:  # gradient clipping
@@ -351,7 +354,8 @@ class BaseTrainer(BaseWorker):
                     self.optim.step()
                 self.optim.zero_grad()
 
-            self.step_sched(is_on_batch=True)
+            if s.do_param_update:
+                self.step_sched(is_on_batch=True)
 
             n, g = self.collect_log(s)
             o.update_dict(n, g)
