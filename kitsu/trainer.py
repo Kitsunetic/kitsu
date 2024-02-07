@@ -329,6 +329,7 @@ class BaseTrainer(BaseWorker):
                     if gradient_accumulation_cnt >= self.gradient_accumulation_steps:
                         gradient_accumulation_cnt = 1
                     else:
+                        gradient_accumulation_cnt += 1
                         s.do_param_update = False
 
                 if s.do_param_update:
