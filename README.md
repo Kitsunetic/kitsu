@@ -1,6 +1,6 @@
 # Kitsu
 
-`Kitsu` is individually developed and used trainer library like PyTorchLightning and Trainer of HuggingFace developed by `kitsu`.
+`Kitsu` is individually developed and used trainer library like PyTorchLightning and Trainer of HuggingFace developed by `Kitsunetic`.
 
 
 ## Installation
