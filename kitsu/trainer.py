@@ -178,7 +178,7 @@ class BaseTrainer(BaseWorker):
         self.best_epoch = -1
         self.epoch = 1
 
-        self.on_init_end()
+        self.on_init_start()
         self.build_network()
         if "ckpt" in args and args.ckpt:
             self.log.info("Load checkpoint:", args.ckpt)
@@ -195,14 +195,14 @@ class BaseTrainer(BaseWorker):
             self.epochs_to_save = 0
 
     def _log_system_info(self):
+        pass
+
+    def on_init_start(self):
         for k, v in get_system_info():
             self.log.info(f"- {k:<20}: {v}")
 
-    def on_init_start(self):
-        self._log_system_info()
-
     def on_init_end(self):
-        pass
+        self._log_system_info()
 
     @property
     def model(self):
