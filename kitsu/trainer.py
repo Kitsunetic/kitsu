@@ -1,5 +1,5 @@
 import math
-import random
+import socket
 import sys
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
@@ -12,6 +12,7 @@ from typing import Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 import torch
+import torch as th
 import torch.distributed as dist
 import torch.nn as nn
 from torch.cuda.amp.autocast_mode import autocast
@@ -19,12 +20,14 @@ from torch.cuda.amp.grad_scaler import GradScaler
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
+from easydict import EasyDict
 
 from kitsu import utils
 from kitsu.logger import CustomLogger
 from kitsu.utils.data import infinite_dataloader
 from kitsu.utils.ema import ema
 from kitsu.utils.optim import ESAM, SAM
+from kitsu.utils.system import get_system_info
 
 
 class BasePreprocessor(metaclass=ABCMeta):
@@ -34,7 +37,7 @@ class BasePreprocessor(metaclass=ABCMeta):
     def to(self, *xs):
         ys = []
         for x in xs:
-            y = self._to(x, self.device)
+            y = self._to(x)
             ys.append(y)
 
         if len(ys) == 1:
@@ -63,7 +66,8 @@ class BasePreprocessor(metaclass=ABCMeta):
 
     @abstractmethod
     def __call__(self, batch, augmentation=False):
-        pass
+        s = EasyDict(log={})
+        return s
 
 
 class BaseWorker(metaclass=ABCMeta):
@@ -141,8 +145,11 @@ class BaseTrainer(BaseWorker):
         use_esam: bool = False,  # Efficient Sharpness-aware Minimization
         save_only_improved: bool = True,
         tqdm_ncols: int = 128,
+        compile_model: bool = False,
+        gradient_accumulation_steps: int = 1,
     ) -> None:
         assert not (mixed_precision and (use_sam or use_esam))
+        assert not (gradient_accumulation_steps and (use_sam or use_esam))
         # assert not (use_sam and use_esam)
 
         super().__init__(args)
@@ -161,6 +168,8 @@ class BaseTrainer(BaseWorker):
         self.use_esam = use_esam
         self.save_only_improved = save_only_improved
         self.tqdm_ncols = tqdm_ncols
+        self.compile_model = compile_model
+        self.gradient_accumulation_steps = gradient_accumulation_steps
 
         if self.mixed_precision:
             self.scaler = GradScaler()
@@ -169,18 +178,31 @@ class BaseTrainer(BaseWorker):
         self.best_epoch = -1
         self.epoch = 1
 
+        self.on_init_start()
         self.build_network()
         if "ckpt" in args and args.ckpt:
             self.log.info("Load checkpoint:", args.ckpt)
             ckpt = torch.load(args.ckpt, map_location="cpu")
             self.load_checkpoint(ckpt)
+
         self.build_dataset()
         self.build_sample_idx()
         self.build_preprocessor()
+        self.on_init_end()
 
         if self.args.debug:
             self.args.epochs = 2
             self.epochs_to_save = 0
+
+    def _log_system_info(self):
+        pass
+
+    def on_init_start(self):
+        for k, v in get_system_info():
+            self.log.info(f"- {k:<20}: {v}")
+
+    def on_init_end(self):
+        self._log_system_info()
 
     @property
     def model(self):
@@ -195,6 +217,15 @@ class BaseTrainer(BaseWorker):
 
     def build_network(self):
         self.model_src = utils.instantiate_from_config(self.args.model).cuda()
+        if self.compile_model:
+            assert (
+                int(str(th.__vesion__).strip().split(".")[0]) > 2
+            ), f"Model compilation is available only for torch>=2.0, but {th.__version__}"
+
+            self.log.info("Start to compile model, it takes minutes.")
+            # self.model_src = th.compile(self.model_src, mode="reduce-overhead")
+            self.model_src = th.compile(self.model_src)
+
         self.model_optim = self._make_distributed_model(self.model_src)
 
         self.optim = utils.instantiate_from_config(self.args.optim, self.model_optim.parameters())
@@ -277,6 +308,7 @@ class BaseTrainer(BaseWorker):
     def train_epoch(self, dl: "DataLoader", prefix="Train"):
         self.model_optim.train()
         o = utils.AverageMeters()
+        gradient_accumulation_cnt = 1  # only when gradient accumultation is on
 
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
@@ -285,16 +317,28 @@ class BaseTrainer(BaseWorker):
             self.on_train_batch_start()
 
             s = self.preprocessor(batch, augmentation=True)
+            s.do_param_update = True
             with autocast(self.mixed_precision):
                 self.step(s)
 
             if self.mixed_precision:
                 self.scaler.scale(s.log.loss).backward()
-                if self.clip_grad > 0:  # gradient clipping
-                    self.scaler.unscale_(self.optim)
-                    nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
-                self.scaler.step(self.optim)
-                self.scaler.update()
+
+                # gradient accumulation
+                if self.gradient_accumulation_steps > 1:
+                    if gradient_accumulation_cnt >= self.gradient_accumulation_steps:
+                        gradient_accumulation_cnt = 1
+                    else:
+                        gradient_accumulation_cnt += 1
+                        s.do_param_update = False
+
+                if s.do_param_update:
+                    if self.clip_grad > 0:  # gradient clipping
+                        self.scaler.unscale_(self.optim)
+                        nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
+                    self.scaler.step(self.optim)
+                    self.scaler.update()
+                    self.optim.zero_grad()
             else:
                 s.log.loss.backward()
                 if self.clip_grad > 0:  # gradient clipping
@@ -309,9 +353,10 @@ class BaseTrainer(BaseWorker):
                     self.optim.second_step(zero_grad=False)
                 else:
                     self.optim.step()
-            self.optim.zero_grad()
+                self.optim.zero_grad()
 
-            self.step_sched(is_on_batch=True)
+            if s.do_param_update:
+                self.step_sched(is_on_batch=True)
 
             n, g = self.collect_log(s)
             o.update_dict(n, g)
