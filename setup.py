@@ -2,7 +2,7 @@ from setuptools import find_packages, setup
 
 setup(
     name="kitsu",
-    version="0.1.0",
+    version="0.1.1",
     description="",
     author="Kitsunetic",
     author_email="jh.shim.gg@gmail.com",
