@@ -219,7 +219,7 @@ class BaseTrainer(BaseWorker):
         self.model_src = utils.instantiate_from_config(self.args.model).cuda()
         if self.compile_model:
             assert (
-                int(str(th.__vesion__).strip().split(".")[0]) > 2
+                int(str(th.__version__).strip().split(".")[0]) > 2
             ), f"Model compilation is available only for torch>=2.0, but {th.__version__}"
 
             self.log.info("Start to compile model, it takes minutes.")
