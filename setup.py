@@ -1,8 +1,11 @@
 from setuptools import find_packages, setup
 
+with open("README.md", encoding="utf-8") as f:
+    desc = f.read()
+
 setup(
     name="kitsu",
-    version="0.1.1",
+    version="0.1.2",
     description="",
     author="Kitsunetic",
     author_email="jh.shim.gg@gmail.com",
@@ -21,4 +24,6 @@ setup(
         "matplotlib",
     ],
     # entry_points={"console_scripts": ["kitsu=kitsu.main:main"]},
+    long_description=desc,
+    long_description_content_type="text/markdown",
 )
