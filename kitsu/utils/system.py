@@ -19,7 +19,7 @@ def get_system_info():
         for line in lscpu:
             try:
                 if line.startswith("Model name:"):
-                    s["cpu"] = line.split()[2:]
+                    s["cpu"] = " ".join(line.split()[2:])
                 elif line.startswith("Socket(s):"):
                     s["cpu_sockets"] = int(line.split()[1])
             except:
@@ -28,7 +28,10 @@ def get_system_info():
     # GPU
     try:
         cmd = "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader"
-        s["gpu"] = subprocess.check_output(cmd, shell=True)
+        gpus = subprocess.check_output(cmd, shell=True).decode().strip().split("\n")
+        s["gpu"] = gpus[0]
+        if len(gpus) > 1:
+            s["gpu"] += " x " + str(len(gpus))
     except subprocess.CalledProcessError:
         pass
 

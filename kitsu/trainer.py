@@ -198,8 +198,8 @@ class BaseTrainer(BaseWorker):
         pass
 
     def on_init_start(self):
-        for k, v in get_system_info():
-            self.log.info(f"- {k:<20}: {v}")
+        for k, v in get_system_info().items():
+            self.log.info(f"- {k:<12}: {v}")
 
     def on_init_end(self):
         self._log_system_info()
