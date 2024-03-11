@@ -2,7 +2,7 @@ import math
 import socket
 import sys
 from abc import ABCMeta, abstractmethod
-from collections import OrderedDict
+from collections import OrderedDict, UserDict
 from contextlib import contextmanager
 from copy import deepcopy
 from functools import reduce
@@ -15,12 +15,12 @@ import torch
 import torch as th
 import torch.distributed as dist
 import torch.nn as nn
+from easydict import EasyDict
 from torch.cuda.amp.autocast_mode import autocast
 from torch.cuda.amp.grad_scaler import GradScaler
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
-from easydict import EasyDict
 
 from kitsu import utils
 from kitsu.logger import CustomLogger
@@ -34,35 +34,20 @@ class BasePreprocessor(metaclass=ABCMeta):
     def __init__(self, device) -> None:
         self.device = device
 
-    def to(self, *xs):
-        ys = []
-        for x in xs:
-            y = self._to(x)
-            ys.append(y)
-
-        if len(ys) == 1:
-            return ys[0]
-        else:
-            return ys
-
-    def _to(self, x):
+    def to(self, x):
         if isinstance(x, torch.Tensor):
             x = x.to(self.device, non_blocking=True)
         elif isinstance(x, np.ndarray):
+            if not x.flags["WRITEABLE"]:
+                x = x.copy()
             x = torch.from_numpy(x).to(self.device, non_blocking=True)
-        elif isinstance(x, (list, tuple, dict)):
-            x = self.batch_to_device(x)
+        elif isinstance(x, List):
+            x = [self.to(item) for item in x]
+        elif isinstance(x, Tuple):
+            x = (self.to(item) for item in x)
+        elif isinstance(x, (Dict, UserDict)):
+            x = {k: self.to(v) for k, v in x.items()}
         return x
-
-    def batch_to_device(self, batch):
-        if isinstance(batch, list):
-            return [self._to(x) for x in batch]
-        elif isinstance(batch, tuple):
-            return (self._to(x) for x in batch)
-        elif isinstance(batch, dict):
-            return {k: self._to(batch[k]) for k in batch}
-        else:
-            return self._to(batch)
 
     @abstractmethod
     def __call__(self, batch, augmentation=False):
