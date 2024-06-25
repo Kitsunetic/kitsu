@@ -229,3 +229,10 @@ def safe_to_tensor(x, device="cpu"):
     elif isinstance(x, dict):
         return {k: safe_to_tensor(v, device=device) for k, v in x.items()}
     return x
+
+
+def cummel(*x):
+    y = 1
+    for v in x:
+        y *= v
+    return y
