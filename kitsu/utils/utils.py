@@ -231,7 +231,7 @@ def safe_to_tensor(x, device="cpu"):
     return x
 
 
-def cummel(*x):
+def cummul(*x):
     y = 1
     for v in x:
         y *= v
