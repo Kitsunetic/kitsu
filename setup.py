@@ -5,7 +5,7 @@ with open("README.md", encoding="utf-8") as f:
 
 setup(
     name="kitsu",
-    version="0.1.2.1",
+    version="0.1.2.2",
     description="",
     author="Kitsunetic",
     author_email="jh.shim.gg@gmail.com",

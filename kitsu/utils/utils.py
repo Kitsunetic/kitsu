@@ -22,6 +22,7 @@ __all__ = [
     "BlackHole",
     "tensor_to_image",
     "safe_to_tensor",
+    "cummul",
 ]
 
 
