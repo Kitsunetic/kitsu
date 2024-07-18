@@ -83,7 +83,7 @@ def get_config(argv=None):
     parser.add_argument("config_file")
     parser.add_argument("--gpus", type=str, required=True)
     parser.add_argument("--debug", action="store_true")
-    parser.add_argument("--outdir")
+    # parser.add_argument("--outdir")
     opt, unknown = parser.parse_known_args(argv)
 
     cfg = load_yaml(opt.config_file)
@@ -92,7 +92,7 @@ def get_config(argv=None):
 
     args.gpus = list(map(int, opt.gpus.split(",")))
     args.debug = opt.debug
-    args.outdir = opt.outdir
+    # args.outdir = opt.outdir
 
     n = datetime.now()
     # timestr = f"{n.year%100}{n.month:02d}{n.day:02d}_{n.hour:02d}{n.minute:02d}{n.second:02d}"
