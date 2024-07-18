@@ -7,6 +7,7 @@ from copy import deepcopy
 import numpy as np
 import torch
 import torch as th
+import torch.nn as nn
 from easydict import EasyDict
 from torch import Tensor
 from torchvision.utils import make_grid
@@ -237,3 +238,11 @@ def cummul(*x):
     for v in x:
         y *= v
     return y
+
+
+def get_model_params(model: nn.Module):
+    model_size = 0
+    for param in model.parameters():
+        if param.requires_grad:
+            model_size += param.data.nelement()
+    return model_size
