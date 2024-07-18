@@ -41,10 +41,12 @@ class BasePreprocessor(metaclass=ABCMeta):
             if not x.flags["WRITEABLE"]:
                 x = x.copy()
             x = torch.from_numpy(x).to(self.device, non_blocking=True)
-        elif isinstance(x, List):
+        # elif isinstance(x, List):
+        #     x = [self.to(item) for item in x]
+        # elif isinstance(x, Tuple):
+        #     x = (self.to(item) for item in x)
+        elif isinstance(x, Sequence):
             x = [self.to(item) for item in x]
-        elif isinstance(x, Tuple):
-            x = (self.to(item) for item in x)
         elif isinstance(x, (Dict, UserDict)):
             x = {k: self.to(v) for k, v in x.items()}
         return x
@@ -165,6 +167,8 @@ class BaseTrainer(BaseWorker):
 
         self.on_init_start()
         self.build_network()
+        self.build_optim()
+        self.build_sched()
         if "ckpt" in args and args.ckpt:
             self.log.info("Load checkpoint:", args.ckpt)
             ckpt = torch.load(args.ckpt, map_location="cpu")
@@ -200,8 +204,11 @@ class BaseTrainer(BaseWorker):
             model = DDP(model, device_ids=[self.args.gpu], find_unused_parameters=self.find_unused_parameters).cuda()
         return model
 
+    def build_model(self):
+        return utils.instantiate_from_config(self.args.model).cuda()
+
     def build_network(self):
-        self.model_src = utils.instantiate_from_config(self.args.model).cuda()
+        self.model_src = self.build_model()
         if self.compile_model:
             assert (
                 int(str(th.__version__).strip().split(".")[0]) > 2
@@ -213,6 +220,11 @@ class BaseTrainer(BaseWorker):
 
         self.model_optim = self._make_distributed_model(self.model_src)
 
+        # self.log.info(self.model)
+        self.log.info("Model Params (Total): %.2fM" % (self.model_params / 1e6))
+        self.log.info("Model Params (Trainable): %.2fM" % (self.model_params_trainable / 1e6))
+
+    def build_optim(self):
         self.optim = utils.instantiate_from_config(self.args.optim, self.model_optim.parameters())
 
         if self.use_sam:
@@ -220,13 +232,11 @@ class BaseTrainer(BaseWorker):
         elif self.use_esam:
             self.optim = ESAM(self.model_optim.parameters(), self.optim)
 
+    def build_sched(self):
         if "sched" in self.args:
             self.sched = utils.instantiate_from_config(self.args.sched, self.optim)
         else:
             self.sched = None
-
-        # self.log.info(self.model)
-        self.log.info("Model Params: %.2fM" % (self.model_params / 1e6))
 
     def load_checkpoint(self, ckpt: PathLike):
         if "model" in ckpt:
@@ -272,6 +282,13 @@ class BaseTrainer(BaseWorker):
 
     @property
     def model_params(self):
+        model_size = 0
+        for param in self.model_src.parameters():
+            model_size += param.data.nelement()
+        return model_size
+
+    @property
+    def model_params_trainable(self):
         model_size = 0
         for param in self.model_src.parameters():
             if param.requires_grad:
