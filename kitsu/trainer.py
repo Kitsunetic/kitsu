@@ -1,5 +1,4 @@
 import math
-import socket
 import sys
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict, UserDict
@@ -41,14 +40,14 @@ class BasePreprocessor(metaclass=ABCMeta):
             if not x.flags["WRITEABLE"]:
                 x = x.copy()
             x = torch.from_numpy(x).to(self.device, non_blocking=True)
-        # elif isinstance(x, List):
-        #     x = [self.to(item) for item in x]
-        # elif isinstance(x, Tuple):
-        #     x = (self.to(item) for item in x)
-        elif isinstance(x, Sequence):
-            x = [self.to(item) for item in x]
         elif isinstance(x, (Dict, UserDict)):
             x = {k: self.to(v) for k, v in x.items()}
+        elif isinstance(x, List):
+            x = [self.to(item) for item in x]
+        elif isinstance(x, Tuple):
+            x = (self.to(item) for item in x)
+        # elif isinstance(x, Sequence):
+        #     x = [self.to(item) for item in x]
         return x
 
     @abstractmethod
@@ -118,6 +117,7 @@ class BaseTrainer(BaseWorker):
     def __init__(
         self,
         args,
+        /,
         n_samples_per_class: int = 10,
         find_unused_parameters: bool = False,
         sample_at_least_per_epochs: int = None,  # sampling is done not so frequently
@@ -238,14 +238,6 @@ class BaseTrainer(BaseWorker):
         else:
             self.sched = None
 
-    def load_checkpoint(self, ckpt: PathLike):
-        if "model" in ckpt:
-            self.model.load_state_dict(ckpt["model"])
-        if "optim" in ckpt:
-            self.optim.load_state_dict(ckpt["optim"])
-        if "epoch" in ckpt:
-            self.epoch = ckpt["epoch"]
-
     def build_dataset(self):
         dls: Sequence[Dataset] = utils.instantiate_from_config(self.args.dataset)
         if len(dls) == 3:
@@ -265,13 +257,32 @@ class BaseTrainer(BaseWorker):
     def build_sample_idx(self):
         pass
 
-    def save(self, out_path):
+    def state_dict(self):
+        sched_state_dict = None
+        if self.sched is not None and hasattr(self.sched, "state_dict"):
+            sched_state_dict = self.sched.state_dict()
+
         data = {
             "optim": self.optim.state_dict(),
             "model": self.model_src.state_dict(),
             "epoch": self.epoch,
+            "sched": sched_state_dict,
         }
+        return data
+
+    def save(self, out_path):
+        data = self.state_dict()
         torch.save(data, str(out_path))
+
+    def load_checkpoint(self, ckpt: PathLike):
+        if "model" in ckpt:
+            self.model.load_state_dict(ckpt["model"])
+        if "optim" in ckpt:
+            self.optim.load_state_dict(ckpt["optim"])
+        if "epoch" in ckpt:
+            self.epoch = ckpt["epoch"]
+        if "sched" in ckpt and ckpt["sched"] is not None and self.sched is not None and hasattr(self.sched, "load_state_dict"):
+            self.sched.load_state_dict(ckpt["sched"])
 
     def step(self, s):
         pass
@@ -374,7 +385,7 @@ class BaseTrainer(BaseWorker):
             t.close()
         return o
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def valid_epoch(self, dl: "DataLoader", prefix="Valid"):
         self.model_optim.eval()
         o = utils.AverageMeters()
@@ -402,7 +413,7 @@ class BaseTrainer(BaseWorker):
             t.close()
         return o
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def evaluation(self, *o_lst):
         assert self.monitor in o_lst[0].data, f"No monitor {self.monitor} in validation results: {list(o_lst[0].data.keys())}"
 
@@ -484,8 +495,8 @@ class BaseTrainer(BaseWorker):
 
 
 class BaseTrainerEMA(BaseTrainer):
-    def __init__(self, *args, ema_decay: float, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, args, /, ema_decay: float, **kwargs):
+        super().__init__(args, **kwargs)
         self.ema_decay = ema_decay
 
         self._ema_state = False
@@ -512,23 +523,14 @@ class BaseTrainerEMA(BaseTrainer):
         super().on_train_batch_end(s)
         ema(self.model_src, self.model_ema, self.ema_decay)
 
-    def save(self, out_path):
-        data = {
-            "optim": self.optim.state_dict(),
-            "model": self.model_src.state_dict(),
-            "model_ema": self.model_ema.state_dict(),
-            "epoch": self.epoch,
-        }
-        torch.save(data, str(out_path))
+    def state_dict(self):
+        data = super().state_dict()
+        data["model_ema"] = self.model_ema.state_dict()
+        return data
 
 
 class StepTrainer(BaseTrainer):
-    def __init__(
-        self,
-        args,
-        valid_per_steps,
-        **kwargs,
-    ) -> None:
+    def __init__(self, args, /, valid_per_steps, **kwargs):
         super().__init__(args, **kwargs)
 
         self.valid_per_steps = valid_per_steps
@@ -562,7 +564,7 @@ class StepTrainer(BaseTrainer):
 
         return s
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def valid_epoch(self, dl: "DataLoader", prefix="Valid"):
         o = utils.AverageMeters()
         desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
@@ -584,7 +586,7 @@ class StepTrainer(BaseTrainer):
                     break
         return o
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def evaluation(self, *o_lst):
         self.step_sched(o_lst[0][self.monitor], is_on_epoch=True)
 
@@ -642,7 +644,7 @@ class StepTrainer(BaseTrainer):
     def _is_eval_stage(self):
         return self.valid_per_steps is not None and (self.epoch % self.valid_per_steps == 0 or self.args.debug)
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def stage_eval(self, o_train):
         o_valid = self.valid_epoch(self.dl_valid)
         improved = self.evaluation(o_valid, o_train)
@@ -676,8 +678,8 @@ class StepTrainer(BaseTrainer):
 
 
 class StepTrainerEMA(StepTrainer):
-    def __init__(self, *args, ema_decay: float, **kwargs):
-        super().__init__(*args, **kwargs)
+    def __init__(self, args, /, ema_decay: float, **kwargs):
+        super().__init__(args, **kwargs)
         self.ema_decay = ema_decay
 
         self._ema_state = False
@@ -707,15 +709,12 @@ class StepTrainerEMA(StepTrainer):
         super().on_train_batch_end(s)
         ema(self.model_src, self.model_ema, self.ema_decay)
 
-    def save(self, out_path):
-        data = {
-            "optim": self.optim.state_dict(),
-            "model": self.model.state_dict(),
-            "epoch": self.epoch,
-        }
-        torch.save(data, str(out_path))
+    def state_dict(self):
+        data = super().state_dict()
+        data["model_ema"] = self.model_ema.state_dict()
+        return data
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def evaluation_ema(self, *o_lst):
         # self.step_sched(o_lst[0][self.monitor], is_on_epoch=True)
 
@@ -771,7 +770,7 @@ class StepTrainerEMA(StepTrainer):
     def sample(self, is_ema: bool):
         pass
 
-    @torch.no_grad()
+    @torch.inference_mode()
     def stage_eval(self, o_train):
         o_valid = self.valid_epoch(self.dl_valid)
         improved = self.evaluation(o_valid, o_train)

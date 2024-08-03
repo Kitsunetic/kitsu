@@ -4,6 +4,7 @@ from typing import Sequence, Union
 import torch as th
 import torch.distributed as dist
 from torch.utils.data import DataLoader, Dataset, DistributedSampler
+from torch.utils.data._utils.collate import default_collate
 
 __all__ = ["first", "build_dataloaders", "ChainDataset", "SubDataset", "infinite_dataloader"]
 
@@ -21,6 +22,7 @@ def build_dataloaders(
     shuffle=False,
     pin_memory=None,
     persistent_workers=None,
+    collate_fn=None,
     **kwargs,
 ) -> Union[DataLoader, Sequence[DataLoader]]:
     if pin_memory is None:
@@ -38,11 +40,17 @@ def build_dataloaders(
     if ddp is None:
         ddp = dist.is_initialized() and dist.get_world_size() > 1
 
+    if collate_fn is None:
+        if hasattr(ds, "collate_fn"):
+            collate_fn = ds.collate_fn
+        else:
+            collate_fn = default_collate
+
     if ddp:
         sampler = DistributedSampler(ds, shuffle=shuffle)
-        dl = DataLoader(ds, sampler=sampler, **dl_kwargs)
+        dl = DataLoader(ds, sampler=sampler, collate_fn=collate_fn, **dl_kwargs)
     else:
-        dl = DataLoader(ds, shuffle=shuffle, **dl_kwargs)
+        dl = DataLoader(ds, shuffle=shuffle, collate_fn=collate_fn, **dl_kwargs)
 
     return dl
 
@@ -96,3 +104,19 @@ def infinite_dataloader(dl, n_iters=inf):
             if step > n_iters:
                 keep = False
                 break
+
+
+def adjust_batch_size_and_num_workers(batch_size: int, num_workers: int, ddp: bool = None, world_size: int = None):
+    if ddp is None:
+        ddp = dist.is_initialized()
+    if world_size is None:
+        if ddp:
+            world_size = dist.get_world_size()
+        else:
+            world_size = 1
+
+    if ddp:
+        batch_size = (batch_size + world_size - 1) // world_size
+        num_workers = (num_workers + world_size - 1) // world_size
+
+    return batch_size, num_workers

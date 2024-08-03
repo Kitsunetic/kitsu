@@ -32,3 +32,20 @@ def safe_broadcast(x, src) -> torch.Tensor:
     if dist.is_initialized():
         dist.broadcast(x, src)
     return x
+
+
+def is_rankzero():
+    if dist.is_initialized():
+        return dist.get_rank() == 0
+    else:
+        return True
+
+
+def rankzero_only(func):
+    def wrapper(*args, **kwargs):
+        if not is_rankzero():
+            return
+
+        return func(*args, **kwargs)
+
+    return wrapper

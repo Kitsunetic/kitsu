@@ -3,6 +3,7 @@ import os
 import random
 from collections import defaultdict
 from copy import deepcopy
+from typing import Callable, Sequence, Union
 
 import numpy as np
 import torch
@@ -24,6 +25,7 @@ __all__ = [
     "tensor_to_image",
     "safe_to_tensor",
     "cummul",
+    "DefaultEasyDict",
 ]
 
 
@@ -246,3 +248,77 @@ def get_model_params(model: nn.Module):
         if param.requires_grad:
             model_size += param.data.nelement()
     return model_size
+
+
+class DefaultEasyDict(defaultdict):
+    """DefulatDict + EasyDict"""
+
+    def __init__(self, *args: Sequence[Union[Callable, dict]], **kwargs):
+        default_factory = None
+
+        for arg in args:
+            if isinstance(arg, dict):
+                for k, v in arg.items():
+                    self.__setattr__(k, v)
+            elif isinstance(arg, Callable):
+                if default_factory is not None:
+                    raise NotImplementedError(f"Only a default factory can be given.")
+                default_factory = arg
+            else:
+                raise NotImplementedError(f"Unknown input data type: {arg}.")
+
+        for k, v in kwargs.items():
+            self.__setattr__(k, v)
+
+        # TODO why this required?
+        # for k in self.__class__.__dict__.keys():
+        #     if not (k.startswith("__") and k.endswith("__")) and k not in ("update", "pop"):
+        #         setattr(self, k, getattr(self, k))
+
+        if default_factory is not None:
+            super().__init__(default_factory)
+
+    def __setattr__(self, name, value):
+        if isinstance(value, (list, tuple)):
+            value = type(value)(self.__class__(x) if isinstance(x, dict) else x for x in value)
+        elif isinstance(value, dict) and not isinstance(value, DefaultEasyDict):
+            value = EasyDict(value)
+
+        self.__setitem__(name, value)
+
+    def __setitem__(self, name, value):
+        if name == "_ipython_canary_method_should_not_exist_":
+            return
+        super().__setitem__(name, value)
+
+    def __getattr__(self, name):
+        return self.__getitem__(name)
+
+    def update(self, e=None, **f):
+        d = e or dict()
+        d.update(f)
+        for k in d:
+            setattr(self, k, d[k])
+
+    def pop(self, k, *args):
+        if hasattr(self, k):
+            delattr(self, k)
+        return super(EasyDict, self).pop(k, *args)
+
+    def as_dict(self):
+        out = {}
+        for k, v in self.items():
+            out[k] = self._as_dict(v)
+        return out
+
+    def _as_dict(self, v):
+        if isinstance(v, list):
+            return [self._as_dict(x) for x in v]
+        elif isinstance(v, tuple):
+            return (self._as_dict(x) for x in v)
+        elif isinstance(v, set):
+            return {self._as_dict(x) for x in v}
+        elif isinstance(v, DefaultEasyDict):
+            return v._as_dict()
+        else:
+            return v
