@@ -2,7 +2,7 @@ import os
 import time
 from os import PathLike
 from pathlib import Path
-from typing import Union, str
+from typing import Union
 
 __all__ = ["try_remove_file"]
 
