@@ -28,6 +28,15 @@ from kitsu.utils.ema import ema
 from kitsu.utils.optim import ESAM, SAM
 from kitsu.utils.system import get_system_info
 
+__all__ = [
+    "BasePreprocessor",
+    "BaseWorker",
+    "BaseTrainer",
+    "BaseTrainerEMA",
+    "StepTrainer",
+    "StepTrainerEMA",
+]
+
 
 class BasePreprocessor(metaclass=ABCMeta):
     def __init__(self, device) -> None:
@@ -306,6 +315,10 @@ class BaseTrainer(BaseWorker):
                 model_size += param.data.nelement()
         return model_size
 
+    @property
+    def is_train_stage(self):
+        return self.model_src.training
+
     def on_train_batch_start(self):
         pass
 
@@ -443,7 +456,7 @@ class BaseTrainer(BaseWorker):
                 if len(saved_files) > self.num_saves:
                     to_deletes = saved_files[: len(saved_files) - self.num_saves]
                     for to_delete in to_deletes:
-                        utils.io.try_remove_file(str(to_delete))
+                        utils.io.try_remove_file(to_delete)
 
                 flag = "*"
                 improved = self.epoch > self.epochs_to_save or self.args.debug or not self.save_only_improved
@@ -614,7 +627,7 @@ class StepTrainer(BaseTrainer):
                 if len(saved_files) > self.num_saves:
                     to_deletes = saved_files[: len(saved_files) - self.num_saves]
                     for to_delete in to_deletes:
-                        utils.io.try_remove_file(str(to_delete))
+                        utils.io.try_remove_file(to_delete)
 
                 flag = "*"
                 improved = self.epoch > self.epochs_to_save or self.args.debug or not self.save_only_improved
@@ -742,7 +755,7 @@ class StepTrainerEMA(StepTrainer):
                 if len(saved_files) > self.num_saves:
                     to_deletes = saved_files[: len(saved_files) - self.num_saves]
                     for to_delete in to_deletes:
-                        utils.io.try_remove_file(str(to_delete))
+                        utils.io.try_remove_file(to_delete)
 
                 flag = "*"
                 improved = self.epoch > self.epochs_to_save or self.args.debug or not self.save_only_improved

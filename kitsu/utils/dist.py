@@ -1,6 +1,16 @@
 import torch
 import torch.distributed as dist
 
+__all__ = [
+    "safe_all_reduce",
+    "safe_all_mean",
+    "safe_all_gather",
+    "safe_barrier",
+    "safe_broadcast",
+    "is_rankzero",
+    "rankzero_only",
+]
+
 
 def safe_all_reduce(x, reduce_op=dist.ReduceOp.SUM) -> torch.Tensor:
     if dist.is_initialized():
@@ -41,11 +51,14 @@ def is_rankzero():
         return True
 
 
-def rankzero_only(func):
-    def wrapper(*args, **kwargs):
-        if not is_rankzero():
-            return
+def rankzero_only(default=None):
+    def decorator(func):
+        def wrapper_func(*args, **kwargs):
+            if is_rankzero():
+                return func(*args, **kwargs)
+            else:
+                return default
 
-        return func(*args, **kwargs)
+        return wrapper_func
 
-    return wrapper
+    return decorator
