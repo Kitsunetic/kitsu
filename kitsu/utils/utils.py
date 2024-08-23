@@ -26,6 +26,7 @@ __all__ = [
     "safe_to_tensor",
     "cummul",
     "DefaultEasyDict",
+    "partial_loose",
 ]
 
 
@@ -270,11 +271,6 @@ class DefaultEasyDict(defaultdict):
         for k, v in kwargs.items():
             self.__setattr__(k, v)
 
-        # TODO why this required?
-        # for k in self.__class__.__dict__.keys():
-        #     if not (k.startswith("__") and k.endswith("__")) and k not in ("update", "pop"):
-        #         setattr(self, k, getattr(self, k))
-
         if default_factory is not None:
             super().__init__(default_factory)
 
@@ -322,3 +318,12 @@ class DefaultEasyDict(defaultdict):
             return v._as_dict()
         else:
             return v
+
+
+def partial_loose(fn: Callable, **kwargs):
+    def wrapper(*args, **kwargs_):
+        kwargs_updated = kwargs.copy()
+        kwargs_updated.update(kwargs_)
+        return fn(*args, **kwargs_updated)
+
+    return wrapper
