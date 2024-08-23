@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Dict, List, Sequence, Tuple, Union
 
 import numpy as np
-import torch
 import torch as th
 import torch.distributed as dist
 import torch.nn as nn
@@ -43,12 +42,12 @@ class BasePreprocessor(metaclass=ABCMeta):
         self.device = device
 
     def to(self, x):
-        if isinstance(x, torch.Tensor):
+        if isinstance(x, th.Tensor):
             x = x.to(self.device, non_blocking=True)
         elif isinstance(x, np.ndarray):
             if not x.flags["WRITEABLE"]:
                 x = x.copy()
-            x = torch.from_numpy(x).to(self.device, non_blocking=True)
+            x = th.from_numpy(x).to(self.device, non_blocking=True)
         elif isinstance(x, (Dict, UserDict)):
             x = {k: self.to(v) for k, v in x.items()}
         elif isinstance(x, List):
@@ -94,7 +93,7 @@ class BaseWorker(metaclass=ABCMeta):
 
         keys = list(s.log.keys())
         if self.ddp:
-            g = s.log.loss.new_tensor([self._t2f(s.log[k]) for k in keys], dtype=torch.float) * s.n
+            g = s.log.loss.new_tensor([self._t2f(s.log[k]) for k in keys], dtype=th.float) * s.n
             dist.all_reduce(g)
             n = s.n * self.args.world_size
             g /= n
@@ -116,7 +115,7 @@ class BaseWorker(metaclass=ABCMeta):
         return msg[1:]
 
     def _t2f(self, x):
-        if isinstance(x, torch.Tensor):
+        if isinstance(x, th.Tensor):
             return x.item()
         else:
             return x
@@ -127,7 +126,7 @@ class BaseTrainer(BaseWorker):
         self,
         args,
         /,
-        n_samples_per_class: int = 10,
+        # n_samples_per_class: int = 10,  # deprecated
         find_unused_parameters: bool = False,
         sample_at_least_per_epochs: int = None,  # sampling is done not so frequently
         mixed_precision: bool = False,
@@ -150,7 +149,7 @@ class BaseTrainer(BaseWorker):
 
         super().__init__(args)
 
-        self.n_samples_per_class = n_samples_per_class
+        # self.n_samples_per_class = n_samples_per_class
         self.find_unused_parameters = find_unused_parameters
         self.sample_at_least_per_epochs = sample_at_least_per_epochs
         self.mixed_precision = mixed_precision
@@ -180,7 +179,7 @@ class BaseTrainer(BaseWorker):
         self.build_sched()
         if "ckpt" in args and args.ckpt:
             self.log.info("Load checkpoint:", args.ckpt)
-            ckpt = torch.load(args.ckpt, map_location="cpu")
+            ckpt = th.load(args.ckpt, map_location="cpu")
             self.load_checkpoint(ckpt)
 
         self.build_dataset()
@@ -281,7 +280,7 @@ class BaseTrainer(BaseWorker):
 
     def save(self, out_path):
         data = self.state_dict()
-        torch.save(data, str(out_path))
+        th.save(data, str(out_path))
 
     def load_checkpoint(self, ckpt: PathLike):
         if "model" in ckpt:
@@ -319,6 +318,10 @@ class BaseTrainer(BaseWorker):
     def is_train_stage(self):
         return self.model_src.training
 
+    @property
+    def is_valid_stage(self):
+        return not self.is_train_stage
+
     def on_train_batch_start(self):
         pass
 
@@ -339,7 +342,7 @@ class BaseTrainer(BaseWorker):
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
             t = tqdm(total=len(dl.dataset), ncols=self.tqdm_ncols, file=sys.stdout, desc=desc, leave=True)
-        for batch in dl:
+        for self.train_step_idx, batch in enumerate(dl):
             self.on_train_batch_start()
 
             s = self.preprocessor(batch, augmentation=True)
@@ -398,7 +401,7 @@ class BaseTrainer(BaseWorker):
             t.close()
         return o
 
-    @torch.inference_mode()
+    @th.inference_mode()
     def valid_epoch(self, dl: "DataLoader", prefix="Valid"):
         self.model_optim.eval()
         o = utils.AverageMeters()
@@ -406,7 +409,7 @@ class BaseTrainer(BaseWorker):
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
             t = tqdm(total=len(dl.dataset), ncols=self.tqdm_ncols, file=sys.stdout, desc=desc, leave=True)
-        for batch in dl:
+        for self.valid_step_idx, batch in enumerate(dl):
             self.on_valid_batch_start()
 
             s = self.preprocessor(batch, augmentation=False)
@@ -426,7 +429,7 @@ class BaseTrainer(BaseWorker):
             t.close()
         return o
 
-    @torch.inference_mode()
+    @th.inference_mode()
     def evaluation(self, *o_lst):
         assert self.monitor in o_lst[0].data, f"No monitor {self.monitor} in validation results: {list(o_lst[0].data.keys())}"
 
@@ -477,7 +480,7 @@ class BaseTrainer(BaseWorker):
 
         # share improved condition with other nodes
         if self.ddp:
-            improved = torch.tensor([improved], device="cuda")
+            improved = th.tensor([improved], device="cuda")
             dist.broadcast(improved, 0)
 
         return improved
@@ -577,13 +580,13 @@ class StepTrainer(BaseTrainer):
 
         return s
 
-    @torch.inference_mode()
+    @th.inference_mode()
     def valid_epoch(self, dl: "DataLoader", prefix="Valid"):
         o = utils.AverageMeters()
         desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
 
         with tqdm(total=len(dl.dataset), ncols=self.tqdm_ncols, file=sys.stdout, desc=desc, disable=not self.rankzero) as pbar:
-            for batch in dl:
+            for self.valid_step_idx, batch in enumerate(dl):
                 s = self.preprocessor(batch, augmentation=False)
                 self.step(s)
 
@@ -599,7 +602,7 @@ class StepTrainer(BaseTrainer):
                     break
         return o
 
-    @torch.inference_mode()
+    @th.inference_mode()
     def evaluation(self, *o_lst):
         self.step_sched(o_lst[0][self.monitor], is_on_epoch=True)
 
@@ -648,7 +651,7 @@ class StepTrainer(BaseTrainer):
 
         # share improved condition with other nodes
         if self.ddp:
-            improved = torch.tensor([improved], device="cuda")
+            improved = th.tensor([improved], device="cuda")
             dist.broadcast(improved, 0)
 
         return improved
@@ -657,7 +660,7 @@ class StepTrainer(BaseTrainer):
     def _is_eval_stage(self):
         return self.valid_per_steps is not None and (self.epoch % self.valid_per_steps == 0 or self.args.debug)
 
-    @torch.inference_mode()
+    @th.inference_mode()
     def stage_eval(self, o_train):
         o_valid = self.valid_epoch(self.dl_valid)
         improved = self.evaluation(o_valid, o_train)
@@ -666,12 +669,14 @@ class StepTrainer(BaseTrainer):
             self.sample()
 
     def fit(self):
+        self.train_step_idx = 0
         o_train = utils.AverageMeters()
         with tqdm(
             total=self.args.epochs, ncols=self.tqdm_ncols, file=sys.stdout, disable=not self.rankzero, desc="Step"
         ) as pbar:
             self.model_optim.train()
             for self.epoch, batch in enumerate(infinite_dataloader(self.dl_train), 1):
+                self.train_step_idx += 1
                 self.model_optim.train()
                 self.train_batch(batch, o_train)
                 pbar.set_postfix_str(o_train.to_msg())
@@ -681,6 +686,7 @@ class StepTrainer(BaseTrainer):
                     self.model_optim.eval()
                     self.stage_eval(o_train)
                     o_train = utils.AverageMeters()
+                    self.train_step_idx = 0
 
                 pbar.update()
 
@@ -727,7 +733,7 @@ class StepTrainerEMA(StepTrainer):
         data["model_ema"] = self.model_ema.state_dict()
         return data
 
-    @torch.inference_mode()
+    @th.inference_mode()
     def evaluation_ema(self, *o_lst):
         # self.step_sched(o_lst[0][self.monitor], is_on_epoch=True)
 
@@ -775,7 +781,7 @@ class StepTrainerEMA(StepTrainer):
 
         # share improved condition with other nodes
         if self.ddp:
-            improved = torch.tensor([improved], device="cuda")
+            improved = th.tensor([improved], device="cuda")
             dist.broadcast(improved, 0)
 
         return improved
@@ -783,7 +789,7 @@ class StepTrainerEMA(StepTrainer):
     def sample(self, is_ema: bool):
         pass
 
-    @torch.inference_mode()
+    @th.inference_mode()
     def stage_eval(self, o_train):
         o_valid = self.valid_epoch(self.dl_valid)
         improved = self.evaluation(o_valid, o_train)
