@@ -21,7 +21,6 @@ Please install following libraries on your own.
 Following libraries will be installed automatically.
 
 - scikit-image
-- PyMCubes
 - omegaconf
 - easydict
 - tqdm

@@ -5,7 +5,7 @@ with open("README.md", encoding="utf-8") as f:
 
 setup(
     name="kitsu",
-    version="0.1.2.4",
+    version="0.1.2.5",
     description="",
     author="Kitsunetic",
     author_email="jh.shim.gg@gmail.com",
@@ -17,7 +17,7 @@ setup(
         # "numpy",
         # "point_cloud_utils",
         "scikit-image",
-        "PyMCubes",
+        # "PyMCubes",
         "omegaconf",
         "easydict",
         "tqdm",
