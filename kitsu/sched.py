@@ -1,5 +1,6 @@
 import warnings
 from math import inf
+from typing import List
 
 import numpy as np
 import torch.nn as nn
@@ -368,8 +369,8 @@ def build_lambda_sched(optimizer, config):
     if config.get("decay_step") is not None:
         # lr_lbmd = lambda e: max(config.lr_decay ** (e / config.decay_step), config.lowest_decay)
         warming_up_t = getattr(config, "warmingup_e", 0)
-        lr_lbmd = (
-            lambda e: max(config.lr_decay ** ((e - warming_up_t) / config.decay_step), config.lowest_decay)
+        lr_lbmd = lambda e: (
+            max(config.lr_decay ** ((e - warming_up_t) / config.decay_step), config.lowest_decay)
             if e >= warming_up_t
             else max(e / warming_up_t, 0.001)
         )
@@ -395,3 +396,31 @@ class SchedulerSequence:
     def step(self, *args, **kwargs):
         for sched in self.scheds:
             sched.step(*args, **kwargs)
+
+
+class WarmupMultistepLR(LambdaLR):
+    def __init__(
+        self,
+        optimizer: Optimizer,
+        warmup_epochs: int,
+        milestones: List[int],
+        gamma: float,
+        last_epoch: int = -1,
+    ):
+        self.warmup_epochs = warmup_epochs
+        self.milestones = milestones
+        self.gamma = gamma
+
+        super().__init__(optimizer, self.lambda_func, last_epoch)
+
+    def lambda_func(self, epoch: int):
+        # warmup
+        if epoch < self.warmup_epochs:
+            return (epoch + 1) / self.warmup_epochs
+
+        new_epoch = epoch - self.warmup_epochs
+        for i, milestone in enumerate(self.milestones):
+            if new_epoch < milestone:
+                return self.gamma**i
+
+        return self.gamma ** len(self.milestones)
