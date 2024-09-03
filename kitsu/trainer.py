@@ -111,7 +111,7 @@ class BaseWorker(metaclass=ABCMeta):
     def g_to_msg(self, g):
         msg = ""
         for k, v in g.items():
-            msg += " %s:%.4f" % (k, v)
+            msg += " %s:%s" % (k, utils.float_to_str_smart(v, 4))
         return msg[1:]
 
     def _t2f(self, x):
@@ -466,7 +466,7 @@ class BaseTrainer(BaseWorker):
 
             msg = "Epoch[%03d/%03d]" % (self.epoch, self.args.epochs)
             msg += f" {self.monitor}[" + ";".join([o._get(self.monitor) for o in o_lst]) + "]"
-            msg += " (best:%.4f%s)" % (self.best, flag)
+            msg += " (best:%s%s)" % (utils.float_to_str_smart(self.best, 4), flag)
 
             keys = reduce(lambda x, o: x | set(o.data.keys()), o_lst, set())
             keys = sorted(list(filter(lambda x: x != self.monitor, keys)))
@@ -637,7 +637,7 @@ class StepTrainer(BaseTrainer):
 
             msg = f"Step[%06d/%06d]" % (self.epoch, self.args.epochs)
             msg += f" {self.monitor}[" + ";".join([o._get(self.monitor) for o in o_lst]) + "]"
-            msg += " (best:%.4f%s)" % (self.best, flag)
+            msg += " (best:%s%s)" % (utils.float_to_str_smart(self.best, 4), flag)
 
             keys = reduce(lambda x, o: x | set(o.data.keys()), o_lst, set())
             keys = sorted(list(filter(lambda x: x != self.monitor, keys)))
@@ -768,7 +768,7 @@ class StepTrainerEMA(StepTrainer):
 
             msg = f"Step-EMA[%06d/%06d]" % (self.epoch, self.args.epochs)
             msg += f" {self.monitor}[" + ";".join([o._get(self.monitor) for o in o_lst]) + "]"
-            msg += " (best:%.4f%s)" % (self.best_ema, flag)
+            msg += " (best:%s%s)" % (utils.float_to_str_smart(self.best_ema, 4), flag)
 
             keys = reduce(lambda x, o: x | set(o.data.keys()), o_lst, set())
             keys = sorted(list(filter(lambda x: x != self.monitor, keys)))

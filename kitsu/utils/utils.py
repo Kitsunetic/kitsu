@@ -27,6 +27,7 @@ __all__ = [
     "cummul",
     "DefaultEasyDict",
     "partial_loose",
+    "float_to_str_smart",
 ]
 
 
@@ -68,17 +69,17 @@ class AverageMeters:
 
     def _get(self, k):
         if k in self.data:
-            return f"{self.data[k]():.4f}"
+            return float_to_str_smart(self.data[k]())
         else:
             return "_"
 
-    def to_msg(self, format="%s:%.4f"):
+    def to_msg(self, format="%s:%s"):
         msgs = []
         for k, v in self.data.items():
             if k == "loss":
-                msgs = [format % (k, v())] + msgs
+                msgs = [format % (k, float_to_str_smart(v()))] + msgs
             else:
-                msgs.append(format % (k, v()))
+                msgs.append(format % (k, float_to_str_smart(v())))
         return " ".join(msgs)
 
 
@@ -327,3 +328,13 @@ def partial_loose(fn: Callable, **kwargs):
         return fn(*args, **kwargs_updated)
 
     return wrapper
+
+
+def float_to_str_smart(v: float, n: int = 4):
+    a, b = f"{v:.4f}".split(".")
+    if len(a) >= n + 2:
+        return a
+    elif len(a) == n + 1:
+        return a + "."
+    else:
+        return a + "." + b[: max(n - len(a) + 1, 0)]
