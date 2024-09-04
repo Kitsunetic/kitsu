@@ -2,9 +2,10 @@ import mcubes
 import numpy as np
 import point_cloud_utils as pcu
 import torch
-from pytorch3d.ops import cubify, sample_points_from_meshes
-from pytorch3d.structures import Meshes
 from skimage import measure
+
+# from pytorch3d.ops import cubify, sample_points_from_meshes
+# from pytorch3d.structures import Meshes
 
 
 def mc_from_psr(psr_grid, pytorchify=False, real_scale=False, zero_level=0):
@@ -143,6 +144,8 @@ def sdfs_to_meshes(psrs, safe=False):
     - return:
         - meshes
     """
+    from pytorch3d.structures import Meshes
+
     mvs, mfs, mns = [], [], []
     for psr in psrs:
         if safe:
@@ -187,6 +190,9 @@ def sdf_to_point(sdf, n_points, safe=False):
     - return:
         - point: n_points 3
     """
+    from pytorch3d.ops import sample_points_from_meshes
+    from pytorch3d.structures import Meshes
+
     if safe:
         try:
             mv, mf, mn = mc_from_psr(sdf, pytorchify=True)
@@ -219,6 +225,8 @@ def sdf_to_point_fast(sdf, n_points):
     - return:
         - point: n_points 3
     """
+    from pytorch3d.ops import cubify, sample_points_from_meshes
+
     mesh = cubify(-sdf, 0)
     pts = sample_points_from_meshes(mesh, n_points)
     return pts[0]

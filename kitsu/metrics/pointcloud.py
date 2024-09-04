@@ -1,6 +1,7 @@
 import torch as th
-from pytorch3d.ops import knn_points
 from torch import Tensor
+
+# from pytorch3d.ops import knn_points
 
 
 class PointDist:
@@ -14,6 +15,8 @@ class PointDist:
         self._knn_done = False
 
     def _calc_knn(self):
+        from pytorch3d.ops import knn_points
+
         self._dist1, _, self._knn1 = knn_points(self.a, self.b, return_nn=True, return_sorted=False)
         self._dist2, _, self._knn2 = knn_points(self.b, self.a, return_nn=True, return_sorted=False)
         # dists: b n 1
