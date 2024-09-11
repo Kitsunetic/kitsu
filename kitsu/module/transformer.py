@@ -18,8 +18,6 @@ from torch import Tensor
 
 from kitsu.module.geglu import GEGLU
 
-# from geglu_triton import GEGLU
-
 __all__ = ["TransformerLayer", "TransformerBlock", "TransformerBlockBatched"]
 
 
@@ -37,7 +35,9 @@ def seqlen_to_index(seqlen: Tensor, max_seqlen: int):
     - input seqlen: (batch_size + 1,), int32.
     - output index: (total,), int64.
     """
-    assert seqlen[0].item() == 0
+    # assert seqlen[0].item() == 0
+    if seqlen[0].item() != 0:
+        set_trace()
 
     B = seqlen.size(0) - 1
     idx = seqlen.new_empty(seqlen[-1].item(), dtype=th.int64)
@@ -62,7 +62,7 @@ class RoPEUnpadded(nn.Module):
 
             pos = th.arange(self._N, dtype=x.dtype, device=x.device)  # m
             freqs = pos[:, None] * freqs_core[None, :].type_as(x)  # m c/2
-            freqs = repeat(freqs, "m c -> m 1 (c x)", x=2)  # m 1 c
+            freqs = repeat(freqs, "m c -> m 1 (c x)", x=2).contiguous()  # m 1 c
             self._freqs_cos = freqs.cos()
             self._freqs_sin = freqs.sin()
 
