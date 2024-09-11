@@ -213,7 +213,8 @@ class BaseTrainer(BaseWorker):
         return model
 
     def build_model(self):
-        return utils.instantiate_from_config(self.args.model).cuda()
+        model:nn.Module = utils.instantiate_from_config(self.args.model).cuda()
+        return model
 
     def build_network(self):
         self.model_src = self.build_model()
