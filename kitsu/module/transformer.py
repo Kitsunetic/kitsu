@@ -11,39 +11,13 @@ import torch as th
 import torch.nn as nn
 import torch.nn.init as init
 import triton
-import triton.language as tl
 from einops import rearrange, repeat
 from flash_attn.flash_attn_interface import flash_attn_unpadded_func
 from torch import Tensor
 
-from kitsu.module.geglu import GEGLU
+from kitsu.module import GEGLU, seqlen_to_index
 
 __all__ = ["TransformerLayer", "TransformerBlock", "TransformerBlockBatched"]
-
-
-@triton.jit
-def seqlen_to_index_kernel(seqlen_ptr, idx_ptr, BLK: tl.constexpr):
-    pid = tl.program_id(0)
-    i = tl.load(seqlen_ptr + pid)
-    j = tl.load(seqlen_ptr + pid + 1)
-    idx = tl.arange(0, BLK)
-    tl.store(idx_ptr + i + idx, idx, mask=idx < (j - i))
-
-
-def seqlen_to_index(seqlen: Tensor, max_seqlen: int):
-    """
-    - input seqlen: (batch_size + 1,), int32.
-    - output index: (total,), int64.
-    """
-    # assert seqlen[0].item() == 0
-    if seqlen[0].item() != 0:
-        set_trace()
-
-    B = seqlen.size(0) - 1
-    idx = seqlen.new_empty(seqlen[-1].item(), dtype=th.int64)
-    BLK = triton.next_power_of_2(max_seqlen)
-    seqlen_to_index_kernel[(B,)](seqlen, idx, BLK)
-    return idx
 
 
 class RoPEUnpadded(nn.Module):
