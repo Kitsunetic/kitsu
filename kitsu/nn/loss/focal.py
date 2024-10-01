@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 
-from kitsu.module.loss.utils import _reduce
+from kitsu.nn.loss.utils import _reduce
 
 __all__ = ["focal_loss", "FocalLoss"]
 

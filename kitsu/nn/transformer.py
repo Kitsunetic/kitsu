@@ -15,7 +15,7 @@ from einops import rearrange, repeat
 from flash_attn.flash_attn_interface import flash_attn_unpadded_func
 from torch import Tensor
 
-from kitsu.module import GEGLU, seqlen_to_index
+from kitsu.nn import GEGLU, seqlen_to_index
 
 __all__ = ["TransformerLayer", "TransformerBlock", "TransformerBlockBatched"]
 
