@@ -7,6 +7,7 @@ from typing import Iterable, Optional, Tuple, Union
 
 import torch
 import torch.distributed as dist
+import torch.distributed
 import torch.nn as nn
 from torch.distributed._tensor import Replicate
 
@@ -78,7 +79,7 @@ class Adam_mini(torch.optim.Optimizer):
         else:
             self.n_kv_heads = n_heads
 
-        self.world_size = torch.cuda.device_count()
+        self.world_size = torch.cuda.device_count() if torch.distributed.is_initialized() else 1
 
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
