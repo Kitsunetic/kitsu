@@ -1,4 +1,3 @@
-import mcubes
 import numpy as np
 import point_cloud_utils as pcu
 import torch
@@ -256,6 +255,8 @@ def udf2mesh(udf, grad, b_max, b_min, resolution):
     - udf: r r r, numpy
     - grad: r r r 3, numpy
     """
+    import mcubes
+
     v_all = []
     f_all = []
     threshold = 0.005  # accelerate extraction
