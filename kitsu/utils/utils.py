@@ -331,10 +331,14 @@ def partial_loose(fn: Callable, **kwargs):
 
 
 def float_to_str_smart(v: float, n: int = 4):
-    a, b = f"{v:.4f}".split(".")
-    if len(a) >= n + 2:
-        return a
-    elif len(a) == n + 1:
-        return a + "."
+    x = f"{v:.4f}"
+    if "." in x:
+        a, b = f"{v:.4f}".split(".")
+        if len(a) >= n + 2:
+            return a
+        elif len(a) == n + 1:
+            return a + "."
+        else:
+            return a + "." + b[: max(n - len(a) + 1, 0)]
     else:
-        return a + "." + b[: max(n - len(a) + 1, 0)]
+        return x
