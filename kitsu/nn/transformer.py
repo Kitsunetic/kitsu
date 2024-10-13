@@ -155,10 +155,20 @@ class TransformerLayer(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, depth: int, dim: int, dim_context: int = None, head_dim=64, dropout=0.0, expansion=4.0, causal=False):
+    def __init__(
+        self,
+        depth: int,
+        dim: int,
+        dim_context: int = None,
+        head_dim=64,
+        dropout=0.0,
+        expansion=4.0,
+        causal=False,
+        layer=TransformerLayer,
+    ):
         super().__init__()
         transformer = partial(
-            TransformerLayer,
+            layer,
             dim=dim,
             dim_context=dim_context,
             head_dim=head_dim,
@@ -186,7 +196,17 @@ class TransformerBlock(nn.Module):
 
 
 class TransformerBlockBatched(nn.Module):
-    def __init__(self, depth: int, dim: int, dim_context: int = None, head_dim=64, dropout=0.0, expansion=4.0, causal=False):
+    def __init__(
+        self,
+        depth: int,
+        dim: int,
+        dim_context: int = None,
+        head_dim=64,
+        dropout=0.0,
+        expansion=4.0,
+        causal=False,
+        layer=TransformerLayer,
+    ):
         super().__init__()
         self.block = TransformerBlock(
             depth=depth,
@@ -196,6 +216,7 @@ class TransformerBlockBatched(nn.Module):
             dropout=dropout,
             expansion=expansion,
             causal=causal,
+            layer=layer,
         )
 
     def forward(self, x: Tensor, context: Tensor = None):
