@@ -1,5 +1,4 @@
 import numpy as np
-import point_cloud_utils as pcu
 import torch
 from skimage import measure
 
@@ -246,6 +245,8 @@ def save_sdf_as_mesh(path, sdf, safe=False):
     - input:
         - sdf: 1 r r r
     """
+    import point_cloud_utils as pcu
+
     verts, faces = sdfs_to_meshes_np(sdf[None], safe=safe)
     pcu.save_mesh_vf(str(path), verts[0], faces[0])
 
