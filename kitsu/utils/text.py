@@ -1,7 +1,7 @@
 import re
 from typing import Dict, List
 
-__all__ = ["make_table", "convert_file_size", "parse_file_size", "convert_dates"]
+__all__ = ["make_table", "convert_file_size", "parse_file_size", "convert_dates", "print_dict"]
 
 
 def make_table(df: Dict[str, List[str]]) -> str:
@@ -59,3 +59,38 @@ def convert_dates(date: int) -> str:
         return str(date // 7) + " weeks"
     else:
         return str(date)
+
+
+def print_dict(dict: dict):
+    from typing import Dict, List, Set, Tuple
+
+    import numpy as np
+    from torch import Tensor
+
+    keylens = [len(k) for k in dict.keys()]
+    max_keylen = max(keylens)
+
+    for k, v in dict.items():
+        if isinstance(v, (Tensor, np.ndarray)):
+            print(("{:<%d}: {}, {}" % max_keylen).format(k, v.shape, v.dtype))
+        elif isinstance(v, (List, Tuple, Set)):
+            if isinstance(v, List):
+                beg, end = "[]"
+            elif isinstance(v, Tuple):
+                beg, end = "()"
+            else:
+                beg, end = "\{\}"
+
+            if len(v) == 0:
+                print(("{:<%d}: {}{}" % max_keylen).format(k, beg, end))
+            else:
+                dots = ", ..." if len(v) > 4 else ""
+                items = ", ".join(map(str, v[:4]))
+                print(("{:<%d}: {}{}{}{}" % max_keylen).format(k, beg, items, dots, end))
+        elif isinstance(v, Dict):
+            dots = ", ..." if len(dict) > 1 else ""
+            for j, u in v.items():
+                print(("{:<%d}: \{{}: {}{}\}" % max_keylen).format(k, j, u, dots))
+                break
+        else:
+            print(("{:<%d}: {}" % max_keylen).format(k, v))
