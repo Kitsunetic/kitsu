@@ -77,10 +77,9 @@ def padding_index_kernel(seqlen_ptr, new_seqlen_ptr, new_max_seqlen, idx_ptr, se
 
     for pid_n in range(tl.cdiv(new_max_seqlen, BLK_N)):
         idx = pid_n * BLK_N + tl.arange(0, BLK_N)  # n
-        idx64 = idx.to(tl.int64)
-        rnd64 = (tl.rand(seed, idx) * l1).to(tl.int64)  # n, [0, l1 - 1]
-        val = tl.where(idx >= l1, rnd64, idx64)
-        tl.store(idx_ptr + i2 + idx, val, mask=idx < l2)
+        rnd = (tl.rand(seed, idx) * l1).to(tl.int32)  # n, [0, l1 - 1]
+        val = i1 + tl.where(idx >= l1, rnd, idx)
+        tl.store(idx_ptr + i2 + idx, val.to(tl.int64), mask=idx < l2)
 
 
 def padding_index(seqlen: Tensor, window_size: int) -> Tensor:
@@ -104,4 +103,4 @@ def padding_index(seqlen: Tensor, window_size: int) -> Tensor:
     BLK_N = min(32, max(2048, triton.next_power_of_2(new_max_seqlen)))
     grid = (B,)
     padding_index_kernel[grid](seqlen, new_seqlen, new_max_seqlen, idx, seed, BLK_N=BLK_N)
-    return idx
+    return idx, new_seqlen, new_max_seqlen
