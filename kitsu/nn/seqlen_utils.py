@@ -6,7 +6,12 @@ import triton
 import triton.language as tl
 from torch import Tensor
 
-__all__ = ["seqlen_to_index", "seqlen_to_batch_index", "padding_index"]
+__all__ = [
+    "seqlen_to_index",
+    "seqlen_to_batch_index",
+    "padding_index",
+    "code_to_seqlen",
+]
 
 
 @triton.jit
@@ -107,3 +112,41 @@ def padding_index(seqlen: Tensor, window_size: int) -> Tensor:
     grid = (B,)
     padding_index_kernel[grid](seqlen, new_seqlen, new_max_seqlen, idx, window_size, seed, BLK_N=BLK_N)
     return idx, new_seqlen, new_max_seqlen
+
+
+@triton.jit
+def code_to_seqlen_kernel(code_ptr, seqlen_ptr, B, N, BLK: tl.constexpr):
+    pid = tl.program_id(0)
+    out = tl.zeros((1,), dtype=tl.int32)
+
+    for nidx in range(tl.cdiv(N, BLK)):
+        offs_n = nidx * BLK + tl.arange(0, BLK)
+        mask_n = offs_n < N
+        code = tl.load(code_ptr + offs_n, mask=mask_n, other=0x7FFF << 48)
+
+        bidx = ((code >> 48) & 0x7FFF).to(tl.int32)
+        x = tl.min((bidx == pid).to(tl.int32) * (offs_n - 0xFFFF), axis=0)
+        out = tl.minimum(out, x)
+
+    out = tl.where(out == 0, -1, out + 0xFFFF)
+    tl.store(seqlen_ptr + pid + tl.arange(0, 1), out)
+
+    # set right-side value
+    tl.store(seqlen_ptr + B, N, mask=pid == B - 1)
+
+
+def code_to_seqlen(code: Tensor, batch_size: int) -> Tensor:
+    """Convert code to seqlen.
+    Args:
+        code (Tensor): N, int64
+    Returns:
+        seqlen (Tensor): (batch_size+1, ), int32
+    """
+    # top 16 bits are allocated for batch index
+    B, N = batch_size, len(code)
+    seqlen = code.new_empty(batch_size + 1, dtype=th.int32)
+    BLK = min(32, max(2048, triton.next_power_of_2(N)))
+    grid = (B,)
+    code_to_seqlen_kernel[grid](code, seqlen, B, N, BLK)
+    max_seqlen = seqlen[-1].item()
+    return seqlen, max_seqlen
