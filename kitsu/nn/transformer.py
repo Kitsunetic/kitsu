@@ -13,9 +13,11 @@ import torch.nn.init as init
 import triton
 from einops import rearrange, repeat
 from flash_attn.flash_attn_interface import flash_attn_unpadded_func
+from torch import Tensor
+
 from kitsu.nn.geglu import GEGLU
 from kitsu.nn.seqlen_utils import seqlen_to_index
-from torch import Tensor
+from kitsu.nn.swiglu import SwiGLUFFNFused
 
 __all__ = ["TransformerLayer", "TransformerBlock", "TransformerBlockBatched"]
 
@@ -61,22 +63,34 @@ class RoPEUnpadded(nn.Module):
         return out
 
 
-class FFN(nn.Sequential):
-    def __init__(self, dim, expansion=4.0):
-        super().__init__(
-            nn.LayerNorm(dim, eps=1e-6),
-            nn.Linear(dim, int(dim * expansion) * 2),
-            GEGLU(),
-            nn.Linear(int(dim * expansion), dim),
-        )
+class FFN(nn.Module):
+    def __init__(self, dim, expansion=4.0, act_type="geglu"):
+        mid_dim = int(dim * expansion)
+        is_fused = False
 
-        self.reset_parameters()
+        if act_type == "geglu":
+            mid_dim *= 2
+            act_fn = GEGLU
+        elif act_type == "gelu":
+            act_fn = nn.GELU
+        elif act_type == "silu":
+            act_fn = lambda: nn.SiLU(inplace=True)
+        elif act_type == "swiglu":
+            is_fused = True
+            self.module = SwiGLUFFNFused(dim, int(dim * expansion))
+        else:
+            raise NotImplementedError(f"Unknown `act_type` {act_type}.")
 
-    def reset_parameters(self):
-        init.trunc_normal_(self[1].weight, std=0.02)
-        init.trunc_normal_(self[3].weight, std=0.02)
-        init.zeros_(self[1].bias)
-        init.zeros_(self[3].bias)
+        if not is_fused:
+            self.module = nn.Sequential(
+                nn.LayerNorm(dim, eps=1e-6),
+                nn.Linear(dim, int(dim * expansion) * 2),
+                act_fn(),
+                nn.Linear(int(dim * expansion), dim),
+            )
+
+    def forward(self, x: Tensor):
+        return self.module(x)
 
 
 class TransformerLayer(nn.Module):
