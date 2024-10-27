@@ -66,7 +66,7 @@ def seqlen_to_batch_index(seqlen: Tensor, max_seqlen: int):
 
 
 @triton.jit
-def padding_index_kernel(seqlen_ptr, new_seqlen_ptr, new_max_seqlen, idx_ptr, seed, BLK_N: tl.constexpr):
+def padding_index_kernel(seqlen_ptr, new_seqlen_ptr, new_max_seqlen, idx_ptr, window_size, seed, BLK_N: tl.constexpr):
     pid_b = tl.program_id(0)
 
     i1 = tl.load(seqlen_ptr + pid_b)
@@ -74,10 +74,13 @@ def padding_index_kernel(seqlen_ptr, new_seqlen_ptr, new_max_seqlen, idx_ptr, se
     i2 = tl.load(new_seqlen_ptr + pid_b)
     j2 = tl.load(new_seqlen_ptr + pid_b + 1)
     l1, l2 = j1 - i1, j2 - i2
+    rnd_range_min = l1 - window_size
+    rnd_range_min = tl.where(rnd_range_min < 0, 0, rnd_range_min)
+    rnd_range = l1 - rnd_range_min
 
     for pid_n in range(tl.cdiv(new_max_seqlen, BLK_N)):
         idx = pid_n * BLK_N + tl.arange(0, BLK_N)  # n
-        rnd = (tl.rand(seed, idx) * l1).to(tl.int32)  # n, [0, l1 - 1]
+        rnd = rnd_range_min + (tl.rand(seed, idx) * rnd_range).to(tl.int32)  # n, [0, l1 - 1]
         val = i1 + tl.where(idx >= l1, rnd, idx)
         tl.store(idx_ptr + i2 + idx, val.to(tl.int64), mask=idx < l2)
 
@@ -102,5 +105,5 @@ def padding_index(seqlen: Tensor, window_size: int) -> Tensor:
 
     BLK_N = min(32, max(2048, triton.next_power_of_2(new_max_seqlen)))
     grid = (B,)
-    padding_index_kernel[grid](seqlen, new_seqlen, new_max_seqlen, idx, seed, BLK_N=BLK_N)
+    padding_index_kernel[grid](seqlen, new_seqlen, new_max_seqlen, idx, window_size, seed, BLK_N=BLK_N)
     return idx, new_seqlen, new_max_seqlen

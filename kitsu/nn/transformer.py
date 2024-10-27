@@ -13,10 +13,9 @@ import torch.nn.init as init
 import triton
 from einops import rearrange, repeat
 from flash_attn.flash_attn_interface import flash_attn_unpadded_func
-from torch import Tensor
-
 from kitsu.nn.geglu import GEGLU
 from kitsu.nn.seqlen_utils import seqlen_to_index
+from torch import Tensor
 
 __all__ = ["TransformerLayer", "TransformerBlock", "TransformerBlockBatched"]
 
