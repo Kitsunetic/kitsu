@@ -11,6 +11,7 @@ __all__ = [
     "seqlen_to_batch_index",
     "padding_index",
     "code_to_seqlen",
+    "code_downscale",
 ]
 
 
@@ -150,3 +151,28 @@ def code_to_seqlen(code: Tensor, batch_size: int) -> Tensor:
     code_to_seqlen_kernel[grid](code, seqlen, B, N, BLK)
     max_seqlen = seqlen[-1].item()
     return seqlen, max_seqlen
+
+
+@triton.jit
+def code_downscale_kernel(code_ptr, out_ptr, n_steps, N, BLK: tl.constexpr):
+    pid = tl.program_id(0)
+    offs_n = BLK * pid + tl.arange(0, BLK)
+    mask_n = offs_n < N
+    code = tl.load(code_ptr + offs_n, mask=mask_n)
+
+    top16bit = code & (0x7FFF << 48)
+    low16bit = code & ((1 << 48) - 1)
+    low16bit >>= n_steps * 3
+
+    new_code = top16bit | low16bit
+    tl.store(out_ptr + offs_n, new_code, mask=mask_n)
+
+
+def code_downscale(code: Tensor, n_steps: int):
+    assert code.ndim == 1 and code.dtype == th.int64, f"{code.shape}, {code.dtype}"
+    N = len(code)
+    new_code = th.empty_like(code)
+    BLK = min(32, max(4096, triton.next_power_of_2(N)))
+    grid = (triton.cdiv(N, BLK),)
+    code_downscale_kernel[grid](code, new_code, n_steps, N, BLK)
+    return new_code
