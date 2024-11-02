@@ -1,6 +1,3 @@
-import random
-from typing import Tuple
-
 import torch as th
 import triton
 import triton.language as tl
@@ -13,6 +10,13 @@ __all__ = [
     "code_to_seqlen",
     "code_downscale",
 ]
+
+
+@triton.jit
+def clamp(x, amin, amax):
+    x = tl.where(x < amin, amin, x)
+    x = tl.where(x >= amax, amax, x)
+    return x
 
 
 @triton.jit
@@ -72,27 +76,27 @@ def seqlen_to_batch_index(seqlen: Tensor, max_seqlen: int):
 
 
 @triton.jit
-def padding_index_kernel(seqlen_ptr, new_seqlen_ptr, new_max_seqlen, idx_ptr, window_size, seed, BLK_N: tl.constexpr):
+def padding_index_kernel(seqlen_ptr, new_seqlen_ptr, new_max_seqlen, idx_ptr, window_size, BLK_N: tl.constexpr):
     pid_b = tl.program_id(0)
-
-    i1 = tl.load(seqlen_ptr + pid_b)
-    j1 = tl.load(seqlen_ptr + pid_b + 1)
-    i2 = tl.load(new_seqlen_ptr + pid_b)
-    j2 = tl.load(new_seqlen_ptr + pid_b + 1)
-    l1, l2 = j1 - i1, j2 - i2
-    rnd_range_min = l1 - window_size
-    rnd_range_min = tl.where(rnd_range_min < 0, 0, rnd_range_min)
-    rnd_range = l1 - rnd_range_min
+    i1 = tl.load(seqlen_ptr + pid_b).to(tl.int32)
+    j1 = tl.load(seqlen_ptr + pid_b + 1).to(tl.int32)
+    i2 = tl.load(new_seqlen_ptr + pid_b).to(tl.int32)
+    j2 = tl.load(new_seqlen_ptr + pid_b + 1).to(tl.int32)
 
     for pid_n in range(tl.cdiv(new_max_seqlen, BLK_N)):
-        idx = pid_n * BLK_N + tl.arange(0, BLK_N)  # n
-        rnd = rnd_range_min + (tl.rand(seed, idx) * rnd_range).to(tl.int32)  # n, [0, l1 - 1]
-        val = i1 + tl.where(idx >= l1, rnd, idx)
-        tl.store(idx_ptr + i2 + idx, val.to(tl.int64), mask=idx < l2)
+        offs_idx = pid_n * BLK_N + tl.arange(0, BLK_N)
+        mask_idx = offs_idx < j2 - i2
+        idx_ptrs = idx_ptr + i2 + offs_idx
+
+        # padding
+        idx = i1 + offs_idx.to(tl.int32)
+        tmp = clamp(idx - window_size, i1, j1 - 1)
+        idx_out = tl.where(idx < j1, idx, tmp)
+        tl.store(idx_ptrs, idx_out, mask=mask_idx)
 
 
 def padding_index(seqlen: Tensor, window_size: int) -> Tensor:
-    """
+    """Giving padding so that the N can be dividable by window_size.
     Args:
         seqlen (Tensor): (batch_size + 1,), int32.
         window_size (int):
@@ -100,7 +104,6 @@ def padding_index(seqlen: Tensor, window_size: int) -> Tensor:
         idx (Tensor): (M, ), int64
     """
     B = seqlen.size(0) - 1
-    seed = int(random.random() * 1e6)
 
     pad_size = ((seqlen[:-1] - seqlen[1:]) % window_size).cumsum_(0)
     new_seqlen = seqlen.clone()
@@ -111,7 +114,7 @@ def padding_index(seqlen: Tensor, window_size: int) -> Tensor:
 
     BLK_N = max(32, min(2048, triton.next_power_of_2(new_max_seqlen)))
     grid = (B,)
-    padding_index_kernel[grid](seqlen, new_seqlen, new_max_seqlen, idx, window_size, seed, BLK_N=BLK_N)
+    padding_index_kernel[grid](seqlen, new_seqlen, new_max_seqlen, idx, BLK_N=BLK_N)
     return idx, new_seqlen, new_max_seqlen
 
 
