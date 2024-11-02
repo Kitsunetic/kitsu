@@ -114,7 +114,7 @@ def padding_index(seqlen: Tensor, window_size: int) -> Tensor:
 
     BLK_N = max(32, min(2048, triton.next_power_of_2(new_max_seqlen)))
     grid = (B,)
-    padding_index_kernel[grid](seqlen, new_seqlen, new_max_seqlen, idx, BLK_N=BLK_N)
+    padding_index_kernel[grid](seqlen, new_seqlen, new_max_seqlen, idx, window_size, BLK_N=BLK_N)
     return idx, new_seqlen, new_max_seqlen
 
 
