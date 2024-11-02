@@ -1,3 +1,5 @@
+from typing import Callable
+
 import torch
 import torch.distributed as dist
 
@@ -52,12 +54,17 @@ def is_rankzero():
 
 
 def rankzero_only(default=None):
+    assert not isinstance(default, Callable)
+
     def decorator(func):
         def wrapper_func(*args, **kwargs):
             if is_rankzero():
-                return func(*args, **kwargs)
+                output = func(*args, **kwargs)
             else:
-                return default
+                output = default
+
+            safe_barrier()
+            return output
 
         return wrapper_func
 

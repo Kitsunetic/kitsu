@@ -213,14 +213,14 @@ class BaseTrainer(BaseWorker):
         return model
 
     def build_model(self):
-        model:nn.Module = utils.instantiate_from_config(self.args.model).cuda()
+        model: nn.Module = utils.instantiate_from_config(self.args.model).cuda()
         return model
 
     def build_network(self):
         self.model_src = self.build_model()
         if self.compile_model:
             assert (
-                int(str(th.__version__).strip().split(".")[0]) > 2
+                int(str(th.__version__).strip().split(".")[0]) >= 2
             ), f"Model compilation is available only for torch>=2.0, but {th.__version__}"
 
             self.log.info("Start to compile model, it takes minutes.")

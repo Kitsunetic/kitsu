@@ -109,7 +109,7 @@ def padding_index(seqlen: Tensor, window_size: int) -> Tensor:
     new_N = new_seqlen[-1].item()
     idx = th.empty(new_N, dtype=th.int64, device=seqlen.device)
 
-    BLK_N = min(32, max(2048, triton.next_power_of_2(new_max_seqlen)))
+    BLK_N = max(32, min(2048, triton.next_power_of_2(new_max_seqlen)))
     grid = (B,)
     padding_index_kernel[grid](seqlen, new_seqlen, new_max_seqlen, idx, window_size, seed, BLK_N=BLK_N)
     return idx, new_seqlen, new_max_seqlen
@@ -146,7 +146,7 @@ def code_to_seqlen(code: Tensor, batch_size: int) -> Tensor:
     # top 16 bits are allocated for batch index
     B, N = batch_size, len(code)
     seqlen = code.new_empty(batch_size + 1, dtype=th.int32)
-    BLK = min(32, max(2048, triton.next_power_of_2(N)))
+    BLK = max(32, min(2048, triton.next_power_of_2(N)))
     grid = (B,)
     code_to_seqlen_kernel[grid](code, seqlen, B, N, BLK)
     max_seqlen = seqlen[-1].item()
@@ -172,7 +172,7 @@ def code_downscale(code: Tensor, n_steps: int):
     assert code.ndim == 1 and code.dtype == th.int64, f"{code.shape}, {code.dtype}"
     N = len(code)
     new_code = th.empty_like(code)
-    BLK = min(32, max(4096, triton.next_power_of_2(N)))
+    BLK = max(32, min(4096, triton.next_power_of_2(N)))
     grid = (triton.cdiv(N, BLK),)
     code_downscale_kernel[grid](code, new_code, n_steps, N, BLK)
     return new_code

@@ -65,9 +65,9 @@ class RoPEUnpadded(nn.Module):
 
 class FFN(nn.Module):
     def __init__(self, dim, expansion=4.0, act_type="geglu"):
+        super().__init__()
         mid_dim = int(dim * expansion)
         is_fused = False
-
         if act_type == "geglu":
             mid_dim *= 2
             act_fn = GEGLU
