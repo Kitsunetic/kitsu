@@ -13,13 +13,56 @@ import torch.nn.init as init
 import triton
 from einops import rearrange, repeat
 from flash_attn.flash_attn_interface import flash_attn_unpadded_func
-from torch import Tensor
-
 from kitsu.nn.geglu import GEGLU
 from kitsu.nn.seqlen_utils import seqlen_to_index
 from kitsu.nn.swiglu import SwiGLUFFNFused
+from torch import Tensor
 
-__all__ = ["TransformerLayer", "TransformerBlock", "TransformerBlockBatched"]
+__all__ = ["RoPE", "RoPEUnpadded", "FFN", "TransformerLayer", "TransformerBlock", "TransformerBlockBatched"]
+
+
+class RoPE(nn.Module):
+    def __init__(self, dim: int, scale=10000):
+        super().__init__()
+        self._freqs_core = 1.0 / (scale ** (th.arange(0, dim, 2, dtype=th.float) / dim))  # c/2
+        self._N = 0
+
+    def get_freqs(self, x: Tensor):
+        """Cache frequency
+        Args:
+            - x (Tensor): b n h c
+        Return:
+            - freqs_cos (Tensor): 1 n 1 c
+            - freqs_sin (Tensor): 1 n 1 c
+        """
+        N = x.size(1)
+        if N > self._N:
+            self._N = triton.next_power_of_2(N)
+            freqs_core = self._freqs_core.to(x.device)
+
+            pos = th.arange(self._N, dtype=x.dtype, device=x.device)  # m
+            freqs = pos[:, None] * freqs_core[None, :].type_as(x)  # m c/2
+            freqs = repeat(freqs, "m c -> 1 m 1 (c x)", x=2)  # 1 m 1 c
+            self._freqs_cos = freqs.cos()
+            self._freqs_sin = freqs.sin()
+
+        freqs_cos = self._freqs_cos[:, :N]  # 1 n 1 c
+        freqs_sin = self._freqs_sin[:, :N]  # 1 n 1 c
+        return freqs_cos, freqs_sin
+
+    def forward(self, x: Tensor):
+        """
+        Args:
+            - x (Tensor): b n h c
+        Return:
+            - x (Tensor): b n h c
+        """
+        freqs_cos, freqs_sin = self.get_freqs(x)  # 1 n 1 c, 1 n 1 c
+
+        x1, x2 = rearrange(x, "b n h (c x) -> b n h c x", x=2).unbind(-1)  # b n h c/2
+        x_rot = th.stack([-x2, x1], -1).flatten(-2)  # b n h c
+        out = x * freqs_cos + x_rot * freqs_sin
+        return out
 
 
 class RoPEUnpadded(nn.Module):
@@ -59,7 +102,7 @@ class RoPEUnpadded(nn.Module):
 
         x1, x2 = rearrange(x, "o h (c x) -> o h c x", x=2).unbind(-1)
         x_rot = th.stack([-x2, x1], -1).flatten(-2)  # total h c/2 2 -> total h c
-        out = x.contiguous() * freqs_cos.contiguous() + x_rot.contiguous() * freqs_sin.contiguous()
+        out = x * freqs_cos + x_rot * freqs_sin
         return out
 
 
