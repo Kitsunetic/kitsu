@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 import torch
 from skimage import measure
@@ -336,7 +338,7 @@ def save_point_cloud(filename, vertices, colors=None, normals=None):
             normals = normals.detach().cpu().numpy()
         pcd.normals = o3d.utility.Vector3dVector(normals)
 
-    o3d.io.write_point_cloud(filename, pcd)
+    o3d.io.write_point_cloud(str(filename), pcd)
 
 
 def save_mesh(filename, vertices, faces, colors=None, normals=None):

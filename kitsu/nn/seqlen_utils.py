@@ -163,7 +163,7 @@ def code_to_seqlen(code: Tensor, batch_size: int) -> Tensor:
     BLK = max(32, min(2048, triton.next_power_of_2(N)))
     grid = (B,)
     code_to_seqlen_kernel[grid](code, seqlen, B, N, BLK)
-    max_seqlen = seqlen[-1].item()
+    max_seqlen = (seqlen[1:] - seqlen[:-1]).amax().item()
     return seqlen, max_seqlen
 
 

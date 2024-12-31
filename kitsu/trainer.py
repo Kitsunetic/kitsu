@@ -248,7 +248,7 @@ class BaseTrainer(BaseWorker):
             self.sched = None
 
     def build_dataset(self):
-        dls: Sequence[Dataset] = utils.instantiate_from_config(self.args.dataset)
+        dls: Sequence[DataLoader] = utils.instantiate_from_config(self.args.dataset)
         if len(dls) == 3:
             self.dl_train, self.dl_valid, self.dl_test = dls
             l1, l2, l3 = len(self.dl_train.dataset), len(self.dl_valid.dataset), len(self.dl_test.dataset)
