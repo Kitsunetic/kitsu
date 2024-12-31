@@ -1,15 +1,26 @@
+from collections import namedtuple
+from dataclasses import dataclass
+
 import torch as th
 import triton
 import triton.language as tl
 from torch import Tensor
 
 __all__ = [
+    "AttentionBatch",
     "seqlen_to_index",
     "seqlen_to_batch_index",
     "padding_index",
     "code_to_seqlen",
     "code_downscale",
 ]
+
+
+@dataclass
+class AttentionBatch:
+    data: Tensor
+    seqlen: Tensor
+    max_seqlen: int
 
 
 @triton.jit
