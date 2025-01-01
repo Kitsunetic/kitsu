@@ -1,10 +1,11 @@
-from collections import namedtuple
 from dataclasses import dataclass
+from typing import Union
 
 import torch as th
 import triton
 import triton.language as tl
 from torch import Tensor
+from torch.autograd import Function
 
 __all__ = [
     "AttentionBatch",
@@ -15,12 +16,22 @@ __all__ = [
     "code_downscale",
 ]
 
+MAX_THREADS = 4096
+MIN_THREADS = 32
+
 
 @dataclass
 class AttentionBatch:
-    data: Tensor
+    x: Tensor
     seqlen: Tensor
     max_seqlen: int
+
+    def new(self, x: Tensor = None, seqlen: Tensor = None, max_seqlen: int = None):
+        return AttentionBatch(
+            x=x if x is not None else self.x,
+            seqlen=seqlen if seqlen is not None else self.seqlen,
+            max_seqlen=max_seqlen if max_seqlen is not None else self.max_seqlen,
+        )
 
 
 @triton.jit
@@ -123,7 +134,7 @@ def padding_index(seqlen: Tensor, window_size: int) -> Tensor:
     new_N = new_seqlen[-1].item()
     idx = th.empty(new_N, dtype=th.int64, device=seqlen.device)
 
-    BLK_N = max(32, min(2048, triton.next_power_of_2(new_max_seqlen)))
+    BLK_N = max(MIN_THREADS, min(MAX_THREADS, triton.next_power_of_2(new_max_seqlen)))
     grid = (B,)
     padding_index_kernel[grid](seqlen, new_seqlen, new_max_seqlen, idx, window_size, BLK_N=BLK_N)
     return idx, new_seqlen, new_max_seqlen
@@ -160,7 +171,7 @@ def code_to_seqlen(code: Tensor, batch_size: int) -> Tensor:
     # top 16 bits are allocated for batch index
     B, N = batch_size, len(code)
     seqlen = code.new_empty(batch_size + 1, dtype=th.int32)
-    BLK = max(32, min(2048, triton.next_power_of_2(N)))
+    BLK = max(MIN_THREADS, min(MIN_THREADS, triton.next_power_of_2(N)))
     grid = (B,)
     code_to_seqlen_kernel[grid](code, seqlen, B, N, BLK)
     max_seqlen = (seqlen[1:] - seqlen[:-1]).amax().item()
@@ -186,7 +197,101 @@ def code_downscale(code: Tensor, n_steps: int):
     assert code.ndim == 1 and code.dtype == th.int64, f"{code.shape}, {code.dtype}"
     N = len(code)
     new_code = th.empty_like(code)
-    BLK = max(32, min(4096, triton.next_power_of_2(N)))
+    BLK = max(MIN_THREADS, min(MAX_THREADS, triton.next_power_of_2(N)))
     grid = (triton.cdiv(N, BLK),)
     code_downscale_kernel[grid](code, new_code, n_steps, N, BLK)
     return new_code
+
+
+@triton.jit
+def padded_batch_fwd_kernel(x_ptr, seqlen_ptr, out_ptr, other, M, C, BLK_C: tl.constexpr, BLK_M: tl.constexpr):
+    """
+    Args:
+        x: N c
+        out: b m c
+    """
+    bidx = tl.program_id(0)
+    midx = tl.program_id(1)
+
+    offs_m = midx * BLK_M + tl.arange(0, BLK_M)
+
+    i = tl.load(seqlen_ptr + bidx)
+    j = tl.load(seqlen_ptr + bidx + 1)
+
+    for cidx in range(tl.cdiv(C, BLK_C)):
+        offs_c = cidx * BLK_C + tl.arange(0, BLK_C)
+        x_ptrs = x_ptr + i * C + offs_m[None, :] * C + offs_c[:, None]  # m c
+        x_mask = ((i + offs_m[None, :]) < j) & (offs_c[:, None] < C)
+
+        out_ptrs = out_ptr + bidx * M * C + offs_m[None, :] * C + offs_c[:, None]  # m c
+        out_mask = (offs_m[None, :] < M) & (offs_c[:, None] < C)
+
+        x = tl.load(x_ptrs, x_mask, other)
+        tl.store(out_ptrs, x, out_mask)
+
+
+@triton.jit
+def padded_batch_bwd_kernel(x_grad_ptr, seqlen_ptr, out_grad_ptr, M, C, BLK_C: tl.constexpr, BLK_M: tl.constexpr):
+    """
+    Args:
+        x_grad_ptr: N c
+        out_grad_ptr: b m c
+    """
+    bidx = tl.program_id(0)
+    midx = tl.program_id(1)
+
+    offs_m = midx * BLK_M + tl.arange(0, BLK_M)
+
+    i = tl.load(seqlen_ptr + bidx)
+    j = tl.load(seqlen_ptr + bidx + 1)
+
+    for cidx in range(tl.cdiv(C, BLK_C)):
+        offs_c = cidx * BLK_C + tl.arange(0, BLK_C)
+        x_grad_ptrs = x_grad_ptr + i * C + offs_m[None, :] * C + offs_c[:, None]  # m c
+        x_grad_mask = (i + offs_m[None, :] < j) & (offs_c[:, None] < C)
+
+        out_grad_ptrs = out_grad_ptr + bidx * M * C + offs_m[None, :] * C + offs_c[:, None]  # m c
+        out_grad_mask = (offs_m[None, :] < M) & (offs_c[:, None] < C)
+
+        out_grad = tl.load(out_grad_ptrs, out_grad_mask)
+        tl.store(x_grad_ptrs, out_grad, x_grad_mask)
+
+
+class PaddedBatch(Function):
+    @staticmethod
+    def forward(ctx, x: Tensor, seqlen: Tensor, max_seqlen: Tensor, other=0.0):
+        assert x.is_contiguous()
+
+        B, M, C = len(seqlen) - 1, *x.shape
+        out = x.new_empty(B, max_seqlen, C)
+
+        BLK_C = min(MAX_THREADS, max(MIN_THREADS, triton.next_power_of_2(C)))
+        BLK_M = min(MAX_THREADS // BLK_C, triton.next_power_of_2(M))
+        GRID_M = triton.cdiv(M, BLK_M)
+        padded_batch_fwd_kernel[(B, GRID_M)](x, seqlen, out, other, M, C, BLK_C, BLK_M)
+
+        ctx.save_for_backward(seqlen)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_out: Tensor):
+        (seqlen,) = ctx.saved_tensors
+        B, M, C, N = *grad_out.shape, seqlen[-1].item()
+        grad_x = grad_out.new_empty(N, C)
+
+        BLK_C = min(MAX_THREADS, max(MIN_THREADS, triton.next_power_of_2(C)))
+        BLK_M = min(MAX_THREADS // BLK_C, triton.next_power_of_2(M))
+        GRID_M = triton.cdiv(M, BLK_M)
+        padded_batch_bwd_kernel[(B, GRID_M)](grad_x, seqlen, grad_out, M, C, BLK_C, BLK_M)
+        return grad_x
+
+
+def padded_batch(x: Union[Tensor, AttentionBatch], seqlen: Tensor = None, max_seqlen: int = None):
+    if isinstance(x, AttentionBatch):
+        assert seqlen is None and max_seqlen is None
+        return PaddedBatch.apply(x.x, x.seqlen, x.max_seqlen)
+    elif isinstance(x, Tensor):
+        assert seqlen is not None and max_seqlen is not None
+        return PaddedBatch.apply(x, seqlen, max_seqlen)
+    else:
+        raise NotImplementedError(str(type(x)))
