@@ -14,6 +14,8 @@ __all__ = [
     "padding_index",
     "code_to_seqlen",
     "code_downscale",
+    "padded_batch",
+    "unpadded_batch",
 ]
 
 MAX_THREADS = 4096
@@ -231,7 +233,7 @@ def padded_batch_fwd_kernel(x_ptr, seqlen_ptr, out_ptr, other, M, C, BLK_C: tl.c
 
 
 @triton.jit
-def padded_batch_bwd_kernel(x_grad_ptr, seqlen_ptr, out_grad_ptr, M, C, BLK_C: tl.constexpr, BLK_M: tl.constexpr):
+def padded_batch_bwd_kernel(x_ptr, seqlen_ptr, out_ptr, M, C, BLK_C: tl.constexpr, BLK_M: tl.constexpr):
     """
     Args:
         x_grad_ptr: N c
@@ -247,23 +249,22 @@ def padded_batch_bwd_kernel(x_grad_ptr, seqlen_ptr, out_grad_ptr, M, C, BLK_C: t
 
     for cidx in range(tl.cdiv(C, BLK_C)):
         offs_c = cidx * BLK_C + tl.arange(0, BLK_C)
-        x_grad_ptrs = x_grad_ptr + i * C + offs_m[None, :] * C + offs_c[:, None]  # m c
-        x_grad_mask = (i + offs_m[None, :] < j) & (offs_c[:, None] < C)
+        x_ptrs = x_ptr + i * C + offs_m[None, :] * C + offs_c[:, None]  # m c
+        x_mask = ((i + offs_m[None, :]) < j) & (offs_c[:, None] < C)
 
-        out_grad_ptrs = out_grad_ptr + bidx * M * C + offs_m[None, :] * C + offs_c[:, None]  # m c
-        out_grad_mask = (offs_m[None, :] < M) & (offs_c[:, None] < C)
+        out_ptrs = out_ptr + bidx * M * C + offs_m[None, :] * C + offs_c[:, None]  # m c
+        out_mask = (offs_m[None, :] < M) & (offs_c[:, None] < C)
 
-        out_grad = tl.load(out_grad_ptrs, out_grad_mask)
-        tl.store(x_grad_ptrs, out_grad, x_grad_mask)
+        out = tl.load(out_ptrs, out_mask)
+        tl.store(x_ptrs, out, x_mask)
 
 
 class PaddedBatch(Function):
     @staticmethod
     def forward(ctx, x: Tensor, seqlen: Tensor, max_seqlen: Tensor, other=0.0):
         assert x.is_contiguous()
-
-        B, M, C = len(seqlen) - 1, *x.shape
-        out = x.new_empty(B, max_seqlen, C)
+        B, C, M = len(seqlen) - 1, x.size(1), max_seqlen
+        out = x.new_empty(B, M, C)
 
         BLK_C = min(MAX_THREADS, max(MIN_THREADS, triton.next_power_of_2(C)))
         BLK_M = min(MAX_THREADS // BLK_C, triton.next_power_of_2(M))
@@ -295,3 +296,35 @@ def padded_batch(x: Union[Tensor, AttentionBatch], seqlen: Tensor = None, max_se
         return PaddedBatch.apply(x, seqlen, max_seqlen)
     else:
         raise NotImplementedError(str(type(x)))
+
+
+class UnpaddedBatch(Function):
+    @staticmethod
+    def forward(ctx, out: Tensor, seqlen: Tensor):
+        assert out.is_contiguous()
+        B, M, C, N = *out.shape, seqlen[-1].item()
+        x = out.new_full((N, C), 10)
+
+        BLK_C = min(MAX_THREADS, max(MIN_THREADS, triton.next_power_of_2(C)))
+        BLK_M = min(MAX_THREADS // BLK_C, triton.next_power_of_2(M))
+        GRID_M = triton.cdiv(M, BLK_M)
+        padded_batch_bwd_kernel[(B, GRID_M)](x, seqlen, out, M, C, BLK_C, BLK_M)
+
+        ctx.save_for_backward(seqlen, M)
+        return x
+
+    @staticmethod
+    def backward(ctx, grad_x: Tensor):
+        seqlen, M = ctx.saved_tensors
+        N, C, B = *grad_x.shape, len(seqlen) - 1
+        grad_out = grad_x.new_empty(B, M, C)
+
+        BLK_C = min(MAX_THREADS, max(MIN_THREADS, triton.next_power_of_2(C)))
+        BLK_M = min(MAX_THREADS // BLK_C, triton.next_power_of_2(M))
+        GRID_M = triton.cdiv(M, BLK_M)
+        padded_batch_fwd_kernel[(B, GRID_M)](grad_x, seqlen, grad_out, 0.0, M, C, BLK_C, BLK_M)
+        return grad_out
+
+
+def unpadded_batch(x: Tensor, seqlen: Tensor):
+    return UnpaddedBatch.apply(x, seqlen)
