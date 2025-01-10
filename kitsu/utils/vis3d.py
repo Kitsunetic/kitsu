@@ -2,10 +2,32 @@ from pathlib import Path
 
 import numpy as np
 import torch
+import torch as th
 from skimage import measure
+import matplotlib.pyplot as plt
 
 # from pytorch3d.ops import cubify, sample_points_from_meshes
 # from pytorch3d.structures import Meshes
+
+
+def _get_fixed_random_color(index: int, colormap_name: str = "tab20") -> tuple:
+    """
+    Get a fixed but random color for a given index from a Matplotlib colormap.
+
+    Parameters:
+        index (int): The index to determine the color.
+        colormap_name (str): The name of the Matplotlib colormap to use (default is 'tab20').
+
+    Returns:
+        list: An (R, G, B) tuple representing the color.
+    """
+    colormap = plt.get_cmap(colormap_name)
+    # Normalize the index to ensure it fits within the colormap range
+    normalized_index = index % colormap.N
+    color = colormap(normalized_index)
+
+    # Convert RGBA to RGB
+    return list(color[:3])
 
 
 def mc_from_psr(psr_grid, pytorchify=False, real_scale=False, zero_level=0):
@@ -341,6 +363,35 @@ def save_point_cloud(filename, vertices, colors=None, normals=None):
     o3d.io.write_point_cloud(str(filename), pcd)
 
 
+def save_point_clouds(filename, *pcds):
+    import open3d as o3d
+
+    cmap = plt.get_cmap("tab20")
+
+    out_pcds = []
+    out_colors = []
+
+    for i, pcd in enumerate(pcds):
+        if isinstance(pcd, torch.Tensor):
+            pcd = pcd.detach().cpu().numpy()
+        assert pcd.ndim == 2 and pcd.shape[1] == 3, pcd.shape
+
+        color = cmap(i % cmap.N)[:3]
+        color = np.array(color, dtype=np.float32)
+        color = np.repeat(color[None], pcd.shape[0], 0)  # n 3
+
+        out_pcds.append(pcd)
+        out_colors.append(color)
+
+    pcd = np.concatenate(out_pcds)
+    color = np.concatenate(out_colors)
+
+    out = o3d.geometry.PointCloud()
+    out.points = o3d.utility.Vector3dVector(pcd)
+    out.colors = o3d.utility.Vector3dVector(color)
+    o3d.io.write_point_cloud(str(filename), out)
+
+
 def save_mesh(filename, vertices, faces, colors=None, normals=None):
     """
     Save a mesh to a PLY file using open3d.
@@ -375,3 +426,12 @@ def save_mesh(filename, vertices, faces, colors=None, normals=None):
         mesh.vertex_normals = o3d.utility.Vector3dVector(normals)
 
     o3d.io.write_triangle_mesh(filename, mesh)
+
+
+def open_point_cloud(filename):
+    import open3d as o3d
+
+    point_cloud = o3d.io.read_point_cloud(filename)
+    points = np.asarray(point_cloud.points)
+    tensor = th.from_numpy(points).float()
+    return tensor
