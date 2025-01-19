@@ -90,8 +90,6 @@ class BaseWorker(metaclass=ABCMeta):
         return self.args.log
 
     def collect_log(self, s, prefix="", postfix=""):
-        assert not s.log.loss.isnan().any(), "nan loss occurred"
-
         keys = list(s.log.keys())
         if self.ddp:
             g = s.log.loss.new_tensor([self._t2f(s.log[k]) for k in keys], dtype=th.float) * s.n
@@ -143,6 +141,7 @@ class BaseTrainer(BaseWorker):
         tqdm_ncols: int = 128,
         compile_model: bool = False,
         gradient_accumulation_steps: int = 1,
+        ignore_nan_loss: bool = False,
     ) -> None:
         assert not (mixed_precision and (use_sam or use_esam))
         assert not (gradient_accumulation_steps and (use_sam or use_esam))
@@ -166,6 +165,7 @@ class BaseTrainer(BaseWorker):
         self.tqdm_ncols = tqdm_ncols
         self.compile_model = compile_model
         self.gradient_accumulation_steps = gradient_accumulation_steps
+        self.ignore_nan_loss = ignore_nan_loss
 
         if self.mixed_precision:
             self.scaler = GradScaler()
@@ -212,6 +212,11 @@ class BaseTrainer(BaseWorker):
                 model = nn.SyncBatchNorm.convert_sync_batchnorm(model).cuda()
             model = DDP(model, device_ids=[self.args.gpu], find_unused_parameters=self.find_unused_parameters).cuda()
         return model
+
+    def collect_log(self, s, prefix="", postfix=""):
+        if not self.ignore_nan_loss:
+            assert not s.log.loss.isnan().any(), "nan loss occurred"
+        return super().collect_log(s, prefix, postfix)
 
     def build_model(self):
         model: nn.Module = utils.instantiate_from_config(self.args.model).cuda()
