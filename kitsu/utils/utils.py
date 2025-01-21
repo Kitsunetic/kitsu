@@ -51,11 +51,12 @@ class AverageMeter(object):
 
 
 class AverageMeters:
-    def __init__(self, *keys) -> None:
+    def __init__(self, *keys, keys_to_ignore=[]):
         # self.data = OrderedDict({key: AverageMeter() for key in keys})
         self.data = defaultdict(AverageMeter)
         for k in keys:
             self.data[k]
+        self.keys_to_ignore = keys_to_ignore
 
     def __getitem__(self, key):
         return self.data[key]()
@@ -78,6 +79,8 @@ class AverageMeters:
         for k, v in self.data.items():
             if k == "loss":
                 msgs = [format % (k, float_to_str_smart(v()))] + msgs
+            elif k in self.keys_to_ignore:
+                continue
             else:
                 msgs.append(format % (k, float_to_str_smart(v())))
         return " ".join(msgs)

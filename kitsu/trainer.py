@@ -142,6 +142,7 @@ class BaseTrainer(BaseWorker):
         compile_model: bool = False,
         gradient_accumulation_steps: int = 1,
         ignore_nan_loss: bool = False,
+        metrics_to_ignore: List[str] = [],
     ) -> None:
         assert not (mixed_precision and (use_sam or use_esam))
         assert not (gradient_accumulation_steps and (use_sam or use_esam))
@@ -166,6 +167,7 @@ class BaseTrainer(BaseWorker):
         self.compile_model = compile_model
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.ignore_nan_loss = ignore_nan_loss
+        self.metrics_to_ignore = metrics_to_ignore
 
         if self.mixed_precision:
             self.scaler = GradScaler()
@@ -343,7 +345,7 @@ class BaseTrainer(BaseWorker):
 
     def train_epoch(self, dl: "DataLoader", prefix="Train"):
         self.model_optim.train()
-        o = utils.AverageMeters()
+        o = utils.AverageMeters(keys_to_ignore=self.metrics_to_ignore)
         gradient_accumulation_cnt = 1  # only when gradient accumultation is on
 
         if self.rankzero:
@@ -411,7 +413,7 @@ class BaseTrainer(BaseWorker):
     @th.inference_mode()
     def valid_epoch(self, dl: "DataLoader", prefix="Valid"):
         self.model_optim.eval()
-        o = utils.AverageMeters()
+        o = utils.AverageMeters(keys_to_ignore=self.metrics_to_ignore)
 
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
@@ -589,7 +591,7 @@ class StepTrainer(BaseTrainer):
 
     @th.inference_mode()
     def valid_epoch(self, dl: "DataLoader", prefix="Valid"):
-        o = utils.AverageMeters()
+        o = utils.AverageMeters(keys_to_ignore=self.metrics_to_ignore)
         desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
 
         with tqdm(total=len(dl.dataset), ncols=self.tqdm_ncols, file=sys.stdout, desc=desc, disable=not self.rankzero) as pbar:
@@ -677,7 +679,7 @@ class StepTrainer(BaseTrainer):
 
     def fit(self):
         self.train_step_idx = 0
-        o_train = utils.AverageMeters()
+        o_train = utils.AverageMeters(keys_to_ignore=self.metrics_to_ignore)
         with tqdm(
             total=self.args.epochs, ncols=self.tqdm_ncols, file=sys.stdout, disable=not self.rankzero, desc="Step"
         ) as pbar:
@@ -692,7 +694,7 @@ class StepTrainer(BaseTrainer):
                     print(flush=True)
                     self.model_optim.eval()
                     self.stage_eval(o_train)
-                    o_train = utils.AverageMeters()
+                    o_train = utils.AverageMeters(keys_to_ignore=self.metrics_to_ignore)
                     self.train_step_idx = 0
 
                 pbar.update()
