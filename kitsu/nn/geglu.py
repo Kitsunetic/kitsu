@@ -27,10 +27,15 @@ import math
 import torch as th
 import torch.nn as nn
 import torch.nn.functional as F
-import triton
-import triton.language as tl
 from torch import Tensor
 from torch.autograd.function import Function
+
+try:
+    import triton
+    import triton.language as tl
+except:
+    pass
+
 
 __all__ = ["geglu", "GEGLU"]
 

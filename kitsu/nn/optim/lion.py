@@ -7,9 +7,13 @@ from __future__ import annotations
 from typing import Callable, Tuple
 
 import torch
-import triton
-import triton.language as tl
 from torch.optim.optimizer import Optimizer
+
+try:
+    import triton
+    import triton.language as tl
+except:
+    pass
 
 
 def exists(val):

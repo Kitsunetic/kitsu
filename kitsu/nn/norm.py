@@ -1,8 +1,13 @@
 import torch as th
 import torch.nn as nn
-from torch_scatter import scatter_mean
 
 from kitsu.nn.seqlen_utils import AttentionBatch, seqlen_to_batch_index
+
+try:
+    from torch_scatter import scatter_mean
+except:
+    pass
+
 
 __all__ = [
     "PointLayerNorm",

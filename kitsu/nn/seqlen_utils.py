@@ -2,10 +2,14 @@ from dataclasses import dataclass
 from typing import Union
 
 import torch as th
-import triton
-import triton.language as tl
 from torch import Tensor
 from torch.autograd import Function
+
+try:
+    import triton
+    import triton.language as tl
+except:
+    pass
 
 __all__ = [
     "AttentionBatch",

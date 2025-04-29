@@ -10,13 +10,18 @@ from pdb import set_trace
 import torch as th
 import torch.nn as nn
 import torch.nn.init as init
-import triton
 from einops import rearrange, repeat
-from flash_attn.flash_attn_interface import flash_attn_unpadded_func
+from torch import Tensor
+
 from kitsu.nn.geglu import GEGLU
 from kitsu.nn.seqlen_utils import seqlen_to_index
 from kitsu.nn.swiglu import SwiGLUFFNFused
-from torch import Tensor
+
+try:
+    import triton
+    from flash_attn.flash_attn_interface import flash_attn_unpadded_func
+except:
+    pass
 
 __all__ = ["RoPE", "RoPEUnpadded", "FFN", "TransformerLayer", "TransformerBlock", "TransformerBlockBatched"]
 
