@@ -90,7 +90,7 @@ def print_dict(dict: dict):
         elif isinstance(v, Dict):
             dots = ", ..." if len(dict) > 1 else ""
             for j, u in v.items():
-                print(("{:<%d}: \{{}: {}{}\}" % max_keylen).format(k, j, u, dots))
+                print(("{:<%d}: {{{}: {}{}}}" % max_keylen).format(k, j, u, dots))
                 break
         else:
             print(("{:<%d}: {}" % max_keylen).format(k, v))
