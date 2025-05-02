@@ -334,33 +334,53 @@ def udf2mesh(udf, grad, b_max, b_min, resolution):
 
 def save_point_cloud(filename, vertices, colors=None, normals=None):
     """
-    Save a point cloud to a PLY file using open3d.
+    Save a point cloud to a PLY file (ASCII) without using Open3D.
 
     Parameters:
-    - filename: Name of the PLY file to save to.
-    - vertices: Nx3 numpy array of vertex positions.
-    - colors (optional): Nx3 numpy array of vertex colors in uint8 format (range [0, 255]).
-                         If None, only vertices are saved.
+    - filename: str, path to output .ply file.
+    - vertices: (N, 3) numpy or torch array of xyz coordinates.
+    - colors: (N, 3) numpy or torch array of uint8 RGB values (0–255).
+    - normals: (N, 3) numpy or torch array of normal vectors.
     """
-    import open3d as o3d
-
     if isinstance(vertices, torch.Tensor):
         vertices = vertices.detach().cpu().numpy()
+    if colors is not None and isinstance(colors, torch.Tensor):
+        colors = colors.detach().cpu().numpy()
+    if normals is not None and isinstance(normals, torch.Tensor):
+        normals = normals.detach().cpu().numpy()
 
-    pcd = o3d.geometry.PointCloud()
-    pcd.points = o3d.utility.Vector3dVector(vertices)
+    num_points = vertices.shape[0]
+    use_color = colors is not None
+    use_normal = normals is not None
+    assert vertices.ndim == 2
+    if use_color:
+        assert colors.ndim == 2
+    if use_normal:
+        assert normals.ndim == 2
 
-    if colors is not None:
-        if isinstance(colors, torch.Tensor):
-            colors = colors.detach().cpu().numpy()
-        pcd.colors = o3d.utility.Vector3dVector(colors)
+    with open(filename, "w") as f:
+        # Write PLY header
+        f.write("ply\n")
+        f.write("format ascii 1.0\n")
+        f.write(f"element vertex {num_points}\n")
+        f.write("property float x\nproperty float y\nproperty float z\n")
+        if use_normal:
+            f.write("property float nx\nproperty float ny\nproperty float nz\n")
+        if use_color:
+            f.write("property uchar red\nproperty uchar green\nproperty uchar blue\n")
+        f.write("end_header\n")
 
-    if normals is not None:
-        if isinstance(normals, torch.Tensor):
-            normals = normals.detach().cpu().numpy()
-        pcd.normals = o3d.utility.Vector3dVector(normals)
-
-    o3d.io.write_point_cloud(str(filename), pcd)
+        # Write each point
+        for i in range(num_points):
+            v = vertices[i]
+            line = f"{v[0]} {v[1]} {v[2]}"
+            if use_normal:
+                n = normals[i]
+                line += f" {n[0]} {n[1]} {n[2]}"
+            if use_color:
+                c = colors[i].astype(np.uint8)
+                line += f" {c[0]} {c[1]} {c[2]}"
+            f.write(line + "\n")
 
 
 def save_point_clouds(filename, *pcds):
@@ -403,29 +423,37 @@ def save_mesh(filename, vertices, faces, colors=None, normals=None):
     - colors (optional): Nx3 numpy array or torch.Tensor of vertex colors in uint8 format (range [0, 255]).
                          If None, only vertices and faces are saved.
     """
-    import open3d as o3d
-
     if isinstance(vertices, torch.Tensor):
         vertices = vertices.detach().cpu().numpy()
-
     if isinstance(faces, torch.Tensor):
         faces = faces.detach().cpu().numpy()
+    if colors is not None and isinstance(colors, torch.Tensor):
+        colors = colors.detach().cpu().numpy()
+        if colors.dtype == np.int8:
+            colors = colors.astype(np.float32) / 255.0
+    if normals is not None and isinstance(normals, torch.Tensor):
+        normals = normals.detach().cpu().numpy()
 
-    mesh = o3d.geometry.TriangleMesh()
-    mesh.vertices = o3d.utility.Vector3dVector(vertices)
-    mesh.triangles = o3d.utility.Vector3iVector(faces)
-
-    if colors is not None:
-        if isinstance(colors, torch.Tensor):
-            colors = colors.detach().cpu().numpy()
-        mesh.vertex_colors = o3d.utility.Vector3dVector(colors)
+    txt = []
+    for i in range(vertices.shape[0]):
+        if colors is not None:
+            txt.append(f"v {vertices[i,0]} {vertices[i,1]} {vertices[i,2]} {colors[i,0]} {colors[i,1]} {colors[i,2]}")
+        else:
+            txt.append(f"v {vertices[i,0]} {vertices[i,1]} {vertices[i,2]}")
 
     if normals is not None:
-        if isinstance(normals, torch.Tensor):
-            normals = normals.detach().cpu().numpy()
-        mesh.vertex_normals = o3d.utility.Vector3dVector(normals)
+        for n in normals:
+            txt.append(f"vn {n[0]} {n[1]} {n[2]}")
 
-    o3d.io.write_triangle_mesh(filename, mesh)
+    for face in faces:
+        f0, f1, f2 = face + 1
+        if normals is not None:
+            txt.append(f"f {f0}//{f0} {f1}//{f1} {f2}//{f2}")
+        else:
+            txt.append(f"f {f0} {f1} {f2}")
+
+    with open(filename, "w") as f:
+        f.write("\n".join(txt))
 
 
 def open_point_cloud(filename):
