@@ -1,4 +1,6 @@
+import numpy as np
 import torch as th
+from torch import Tensor
 
 
 def get_device():
@@ -13,3 +15,18 @@ def get_device():
 
 
 device = get_device()
+
+
+def all_to(data, device):
+    if isinstance(data, Tensor):
+        return data.to(device)
+    elif isinstance(data, np.ndarray):
+        return th.from_numpy(data).to(device)
+    elif isinstance(data, dict):
+        return {k: all_to(v, device) for k, v in data.items()}
+    elif isinstance(data, (list, tuple)):
+        return type(data)(all_to(x, device) for x in data)
+    elif isinstance(data, set):
+        return {all_to(x, device) for x in data}
+    else:
+        return data
