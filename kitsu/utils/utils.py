@@ -19,6 +19,7 @@ __all__ = [
     "seed_everything",
     "find_free_port",
     "get_model_params",
+    "class_from_config",
     "instantiate_from_config",
     "get_obj_from_str",
     "BlackHole",
@@ -147,11 +148,19 @@ def _parse_pyinstance_list(params: list):
     return out_list
 
 
+def class_from_config(config: dict):
+    config = deepcopy(config)
+
+    if "target" not in config:
+        raise KeyError("Expected key `target` to retrieve class.")
+
+    return get_obj_from_str(config["target"])
+
+
 def instantiate_from_config(config: dict, *args, **kwargs):
     config = deepcopy(config)
 
-    # https://github.com/CompVis/latent-diffusion/blob/a506df5756472e2ebaf9078affdde2c4f1502cd4/ldm/util.py#L78
-    if not "target" in config:
+    if "target" not in config:
         raise KeyError("Expected key `target` to instantiate.")
 
     # parse __pyinstance__
@@ -160,7 +169,8 @@ def instantiate_from_config(config: dict, *args, **kwargs):
     params = config.get("params", dict())
     params = _parse_pyinstance_dict(params)
 
-    return get_obj_from_str(config["target"])(*argums, *args, **params, **kwargs)
+    cls = class_from_config(config)
+    return cls(*argums, *args, **params, **kwargs)
 
 
 def get_obj_from_str(string, reload=False):
