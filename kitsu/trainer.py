@@ -13,10 +13,8 @@ from typing import Dict, List, Sequence, Tuple, Union
 import numpy as np
 import torch as th
 import torch.distributed as dist
-import torch.nn as nn
 from easydict import EasyDict
-from torch.cuda.amp.autocast_mode import autocast
-from torch.cuda.amp.grad_scaler import GradScaler
+from torch import GradScaler, autocast, nn
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
@@ -169,15 +167,17 @@ class BaseTrainer(BaseWorker):
         self.ignore_nan_loss = ignore_nan_loss
         self.metrics_to_ignore = metrics_to_ignore
 
-        if self.mixed_precision:
-            self.scaler = GradScaler()
-
         self.best = math.inf if self.small_is_better else -math.inf
         self.best_epoch = -1
         self.epoch = 1
 
         self.on_init_start()
+
+        self.build_dataset()
+        self.build_sample_idx()
+
         self.build_network()
+        self.build_preprocessor()
         self.build_optim()
         self.build_sched()
         if "ckpt" in args and args.ckpt:
@@ -185,14 +185,14 @@ class BaseTrainer(BaseWorker):
             ckpt = th.load(args.ckpt, map_location="cpu")
             self.load_checkpoint(ckpt)
 
-        self.build_dataset()
-        self.build_sample_idx()
-        self.build_preprocessor()
-        self.on_init_end()
+        if self.mixed_precision:
+            self.scaler = GradScaler(device=self.device)
 
         if self.args.debug:
             self.args.epochs = 2
             self.epochs_to_save = 0
+
+        self.on_init_end()
 
     def _log_system_info(self):
         pass
@@ -356,7 +356,7 @@ class BaseTrainer(BaseWorker):
 
             s = self.preprocessor(batch, augmentation=True)
             s.do_param_update = True
-            with autocast(self.mixed_precision):
+            with autocast(str(self.device), th.float16, enabled=self.mixed_precision):
                 self.step(s)
 
             if self.mixed_precision:
@@ -385,7 +385,7 @@ class BaseTrainer(BaseWorker):
                 if self.use_sam or self.use_esam:
                     self.optim.first_step(zero_grad=True)
                     s = self.preprocessor(batch, augmentation=True)
-                    with autocast(self.mixed_precision):
+                    with autocast(str(self.device), th.float16, enabled=self.mixed_precision):
                         self.step(s)
                     s.log.loss.backward()
                     self.optim.second_step(zero_grad=False)
@@ -564,7 +564,7 @@ class StepTrainer(BaseTrainer):
         self.on_train_batch_start()
 
         s = self.preprocessor(batch, augmentation=True)
-        with autocast(self.mixed_precision):
+        with autocast(str(self.device), th.float16, enabled=self.mixed_precision):
             self.step(s)
 
         if self.mixed_precision:
