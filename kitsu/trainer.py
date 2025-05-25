@@ -27,6 +27,7 @@ from kitsu.utils.data import infinite_dataloader
 from kitsu.utils.ema import ema
 from kitsu.utils.optim import ESAM, SAM
 from kitsu.utils.system import get_system_info
+from kitsu.utils.torch import device
 
 __all__ = [
     "BasePreprocessor",
@@ -39,7 +40,7 @@ __all__ = [
 
 
 class BasePreprocessor(metaclass=ABCMeta):
-    def __init__(self, device) -> None:
+    def __init__(self, device=device):
         self.device = device
 
     def to(self, x):
@@ -177,6 +178,10 @@ class BaseTrainer(BaseWorker):
         self.epoch = 1
 
         self.on_init_start()
+
+        self.build_dataset()
+        self.build_preprocessor()
+
         self.build_network()
         self.build_optim()
         self.build_sched()
@@ -185,9 +190,7 @@ class BaseTrainer(BaseWorker):
             ckpt = th.load(args.ckpt, map_location="cpu")
             self.load_checkpoint(ckpt)
 
-        self.build_dataset()
         self.build_sample_idx()
-        self.build_preprocessor()
         self.on_init_end()
 
         if self.args.debug:
@@ -211,8 +214,8 @@ class BaseTrainer(BaseWorker):
     def _make_distributed_model(self, model: nn.Module):
         if self.ddp:
             if self.use_sync_bn:
-                model = nn.SyncBatchNorm.convert_sync_batchnorm(model).cuda()
-            model = DDP(model, device_ids=[self.args.gpu], find_unused_parameters=self.find_unused_parameters).cuda()
+                model = nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
+            model = DDP(model, device_ids=[self.args.gpu], find_unused_parameters=self.find_unused_parameters).to(device)
         return model
 
     def collect_log(self, s, prefix="", postfix=""):
@@ -221,7 +224,7 @@ class BaseTrainer(BaseWorker):
         return super().collect_log(s, prefix, postfix)
 
     def build_model(self):
-        model: nn.Module = utils.instantiate_from_config(self.args.model).cuda()
+        model: nn.Module = utils.instantiate_from_config(self.args.model).to(device)
         return model
 
     def build_network(self):
