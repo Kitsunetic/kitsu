@@ -273,7 +273,7 @@ class BaseTrainer(BaseWorker):
             raise NotImplementedError
 
     def build_preprocessor(self):
-        self.preprocessor: BasePreprocessor = utils.instantiate_from_config(self.args.preprocessor, device=self.device)
+        self.preprocessor: BasePreprocessor = utils.instantiate_from_config(self.args.preprocessor, device=device)
 
     def build_sample_idx(self):
         pass
