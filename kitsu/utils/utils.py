@@ -25,6 +25,7 @@ __all__ = [
     "BlackHole",
     "tensor_to_image",
     "safe_to_tensor",
+    "safe_to_np",
     "cummul",
     "DefaultEasyDict",
     "partial_loose",
@@ -247,6 +248,18 @@ def safe_to_tensor(x, device="cpu"):
         return th.tensor(x, device=device)
     elif isinstance(x, dict):
         return {k: safe_to_tensor(v, device=device) for k, v in x.items()}
+    return x
+
+
+def safe_to_np(x):
+    if isinstance(x, np.ndarray):
+        return x
+    elif isinstance(x, th.Tensor):
+        return x.detach().cpu().numpy()
+    elif isinstance(x, (list, tuple)):
+        return [safe_to_np(v)  for v in x]
+    elif isinstance(x, dict):
+        return {k: safe_to_np(v) for k, v in x.items()}
     return x
 
 
