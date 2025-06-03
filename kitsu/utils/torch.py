@@ -1,3 +1,5 @@
+import gc
+
 import numpy as np
 import torch as th
 from torch import Tensor
@@ -30,3 +32,16 @@ def all_to(data, device):
         return {all_to(x, device) for x in data}
     else:
         return data
+
+
+def clear_memory():
+    """
+    Clears cached GPU memory based on the available PyTorch backend (CUDA or MPS).
+    If no GPU is available, it prints a message.
+    """
+    if th.cuda.is_available():
+        th.cuda.empty_cache()
+    elif th.backends.mps.is_available():
+        th.mps.empty_cache()
+
+    gc.collect()
