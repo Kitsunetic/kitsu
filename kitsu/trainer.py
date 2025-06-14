@@ -13,14 +13,16 @@ from typing import Dict, List, Sequence, Tuple, Union
 import numpy as np
 import torch as th
 import torch.distributed as dist
+import yaml
 from easydict import EasyDict
 from torch import GradScaler, autocast, nn
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
+from kitsu.utils import instantiate_from_config
 from tqdm import tqdm
 
 from kitsu import utils
-from kitsu.logger import CustomLogger
+from kitsu.logger import CustomLogger, getLogger
 from kitsu.utils.data import infinite_dataloader
 from kitsu.utils.ema import ema
 from kitsu.utils.optim import ESAM, SAM
@@ -147,6 +149,8 @@ class BaseTrainer(BaseWorker):
         assert not (gradient_accumulation_steps and (use_sam or use_esam))
         # assert not (use_sam and use_esam)
 
+        args.exp_path = Path(args.exp_path)
+
         super().__init__(args)
 
         # self.n_samples_per_class = n_samples_per_class
@@ -180,12 +184,7 @@ class BaseTrainer(BaseWorker):
         self.build_network()
         self.build_optim()
         self.build_sched()
-
-        if "ckpt" in args and args.ckpt:
-            self.log.info("Load checkpoint:", args.ckpt)
-            ckpt = th.load(args.ckpt, map_location="cpu")
-            self.load_checkpoint(ckpt)
-
+        self.load_ckpt()
         self.build_sample_idx()
         self.on_init_end()
 
@@ -277,6 +276,12 @@ class BaseTrainer(BaseWorker):
 
     def build_sample_idx(self):
         pass
+
+    def load_ckpt(self):
+        if "ckpt" in self.args and self.args.ckpt:
+            self.log.info("Load checkpoint:", self.args.ckpt)
+            ckpt = th.load(self.args.ckpt, map_location="cpu")
+            self.load_checkpoint(ckpt)
 
     def state_dict(self):
         sched_state_dict = None
@@ -521,6 +526,29 @@ class BaseTrainer(BaseWorker):
                 self.sched.step(metric)
             else:
                 self.sched.step()
+
+    @staticmethod
+    def load_args(args_path: str):
+        with open(args_path, "r") as f:
+            args = EasyDict(yaml.safe_load(f))
+
+        args.exp_path = Path(args.exp_path)
+        args.world_size = 1
+        args.ddp = False
+        args.rank = 0
+        args.rankzero = True
+        args.gpu = 0
+        args.log = getLogger()
+        return args
+
+    @staticmethod
+    def from_args(args_path: str, ckpt_path: str = None):
+        args = BaseTrainer.load_args(args_path)
+        if ckpt_path is not None:
+            args.ckpt = ckpt_path
+
+        trainer = instantiate_from_config(args.trainer, args)
+        return trainer
 
 
 class BaseTrainerEMA(BaseTrainer):

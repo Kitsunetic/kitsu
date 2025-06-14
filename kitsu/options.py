@@ -104,12 +104,13 @@ def get_config(argv=None):
     if args.debug:
         timestr += "_debug"
 
-    args.exp_path = os.path.join(args["exp_dir"], timestr)
-    (Path(args.exp_path) / "samples").mkdir(parents=True, exist_ok=True)
-    print("Start on exp_path:", args.exp_path)
+    if getattr(args, "exp_path", None) is None:
+        args.exp_path = os.path.join(args["exp_dir"], timestr)
+        (Path(args.exp_path) / "samples").mkdir(parents=True, exist_ok=True)
+        print("Start on exp_path:", args.exp_path)
 
-    with open(os.path.join(args.exp_path, "args.yaml"), "w") as f:
-        OmegaConf.save(args, f)
+        with open(os.path.join(args.exp_path, "args.yaml"), "w") as f:
+            OmegaConf.save(args, f)
 
     print(OmegaConf.to_yaml(args, resolve=True))
     args = OmegaConf.to_container(args, resolve=True)
@@ -117,7 +118,6 @@ def get_config(argv=None):
     args.exp_path = Path(args.exp_path)
 
     args = _postprocess_yaml_recursive(args)
-
     return args
 
 
