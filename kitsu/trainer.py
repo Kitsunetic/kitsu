@@ -18,16 +18,16 @@ from easydict import EasyDict
 from torch import GradScaler, autocast, nn
 from torch.nn.parallel.distributed import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, Dataset
-from kitsu.utils import instantiate_from_config
 from tqdm import tqdm
 
 from kitsu import utils
 from kitsu.logger import CustomLogger, getLogger
+from kitsu.utils import instantiate_from_config
 from kitsu.utils.data import infinite_dataloader
 from kitsu.utils.ema import ema
 from kitsu.utils.optim import ESAM, SAM
 from kitsu.utils.system import get_system_info
-from kitsu.utils.torch import device
+from kitsu.utils.torch import get_device, get_mixed_precision_dtype
 
 __all__ = [
     "BasePreprocessor",
@@ -40,7 +40,8 @@ __all__ = [
 
 
 class BasePreprocessor(metaclass=ABCMeta):
-    def __init__(self, device=device):
+    def __init__(self, device=None):
+        device = get_device() if device is None else device
         self.device = device
 
     def to(self, x):
@@ -214,8 +215,8 @@ class BaseTrainer(BaseWorker):
     def _make_distributed_model(self, model: nn.Module):
         if self.ddp:
             if self.use_sync_bn:
-                model = nn.SyncBatchNorm.convert_sync_batchnorm(model).to(device)
-            model = DDP(model, device_ids=[self.args.gpu], find_unused_parameters=self.find_unused_parameters).to(device)
+                model = nn.SyncBatchNorm.convert_sync_batchnorm(model).to(self.device)
+            model = DDP(model, device_ids=[self.args.gpu], find_unused_parameters=self.find_unused_parameters).to(self.device)
         return model
 
     def collect_log(self, s, prefix="", postfix=""):
@@ -224,7 +225,7 @@ class BaseTrainer(BaseWorker):
         return super().collect_log(s, prefix, postfix)
 
     def build_model(self):
-        model: nn.Module = utils.instantiate_from_config(self.args.model).to(device)
+        model: nn.Module = utils.instantiate_from_config(self.args.model).to(self.device)
         return model
 
     def build_network(self):
@@ -272,7 +273,7 @@ class BaseTrainer(BaseWorker):
             raise NotImplementedError
 
     def build_preprocessor(self):
-        self.preprocessor: BasePreprocessor = utils.instantiate_from_config(self.args.preprocessor, device=device)
+        self.preprocessor: BasePreprocessor = utils.instantiate_from_config(self.args.preprocessor, device=self.device)
 
     def build_sample_idx(self):
         pass
@@ -315,7 +316,10 @@ class BaseTrainer(BaseWorker):
 
     @property
     def device(self):
-        return next(self.model_src.parameters()).device
+        if hasattr(self, "model_src"):
+            return next(self.model_src.parameters()).device
+        else:
+            return get_device()
 
     @property
     def model_params(self):
@@ -365,7 +369,7 @@ class BaseTrainer(BaseWorker):
 
             s = self.preprocessor(batch, augmentation=True)
             s.do_param_update = True
-            with autocast(str(self.device), th.float16, enabled=self.mixed_precision):
+            with autocast(str(self.device), get_mixed_precision_dtype(self.device), enabled=self.mixed_precision):
                 self.step(s)
 
             if self.mixed_precision:
@@ -394,7 +398,7 @@ class BaseTrainer(BaseWorker):
                 if self.use_sam or self.use_esam:
                     self.optim.first_step(zero_grad=True)
                     s = self.preprocessor(batch, augmentation=True)
-                    with autocast(str(self.device), th.float16, enabled=self.mixed_precision):
+                    with autocast(str(self.device), get_mixed_precision_dtype(self.device), enabled=self.mixed_precision):
                         self.step(s)
                     s.log.loss.backward()
                     self.optim.second_step(zero_grad=False)
@@ -596,7 +600,7 @@ class StepTrainer(BaseTrainer):
         self.on_train_batch_start()
 
         s = self.preprocessor(batch, augmentation=True)
-        with autocast(str(self.device), th.float16, enabled=self.mixed_precision):
+        with autocast(str(self.device), get_mixed_precision_dtype(self.device), enabled=self.mixed_precision):
             self.step(s)
 
         if self.mixed_precision:

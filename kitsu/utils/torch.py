@@ -45,3 +45,17 @@ def clear_memory():
         th.mps.empty_cache()
 
     gc.collect()
+
+
+def get_mixed_precision_dtype(device):
+    # Check for bfloat16 support on CUDA device
+    if device.type == "cuda":
+        major, minor = th.cuda.get_device_capability(device)
+        # Ampere (8.0+) and newer support bfloat16
+        if major >= 8:
+            return th.bfloat16
+        else:
+            return th.float16
+    else:
+        # On CPU, bfloat16 is supported but autocast for CPU is less common
+        return th.float16
