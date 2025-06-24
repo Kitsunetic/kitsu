@@ -456,10 +456,46 @@ def save_mesh(filename, vertices, faces, colors=None, normals=None):
         f.write("\n".join(txt))
 
 
-def open_point_cloud(filename):
-    import open3d as o3d
+# def open_point_cloud(filename):
+#     import open3d as o3d
 
-    point_cloud = o3d.io.read_point_cloud(filename)
-    points = np.asarray(point_cloud.points)
-    tensor = th.from_numpy(points).float()
-    return tensor
+#     point_cloud = o3d.io.read_point_cloud(filename)
+#     points = np.asarray(point_cloud.points)
+#     tensor = th.from_numpy(points).float()
+#     return tensor
+
+
+def open_point_cloud(filename):
+    """
+    Read a point cloud from an ASCII .ply file without using Open3D.
+
+    Returns:
+    - torch.Tensor of shape (N, 3) containing xyz coordinates.
+    """
+    with open(filename, "r") as f:
+        lines = f.readlines()
+
+    # Parse header
+    header_ended = False
+    vertex_count = 0
+    header_lines = []
+    for i, line in enumerate(lines):
+        header_lines.append(line.strip())
+        if line.startswith("element vertex"):
+            vertex_count = int(line.split()[-1])
+        if line.strip() == "end_header":
+            header_ended = True
+            start_idx = i + 1
+            break
+
+    assert header_ended, "Invalid PLY file: missing end_header"
+
+    # Read vertex data
+    vertices = []
+    for line in lines[start_idx : start_idx + vertex_count]:
+        tokens = line.strip().split()
+        xyz = list(map(float, tokens[:3]))
+        vertices.append(xyz)
+
+    vertices = np.array(vertices, dtype=np.float32)
+    return torch.from_numpy(vertices)
