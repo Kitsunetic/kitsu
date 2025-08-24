@@ -105,14 +105,6 @@ def get_config(argv=None):
     if args.debug:
         timestr += "_debug"
 
-    # gradient accumulation setting with easy
-    if (
-        hasattr(args, "trainer")
-        and hasattr(args.trainer, "params")
-        and getattr(args.trainer.params, "gradient_accumulation_steps", None) is not None
-    ) and getattr(args, "ga", None):
-        args.trainer.params.gradient_accumulation_steps = args.ga
-
     # save args into yaml file
     if getattr(args, "exp_path", None) is None:
         args.exp_path = os.path.join(args["exp_dir"], timestr)
