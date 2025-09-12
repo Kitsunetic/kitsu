@@ -8,7 +8,7 @@ from copy import deepcopy
 from functools import reduce
 from os import PathLike
 from pathlib import Path
-from typing import Dict, List, Sequence, Tuple, Union
+from typing import Callable, Dict, List, Sequence, Tuple, Union
 
 import numpy as np
 import torch as th

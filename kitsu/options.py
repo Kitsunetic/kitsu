@@ -25,6 +25,7 @@ import os
 from datetime import datetime
 from pathlib import Path
 
+import torch
 from easydict import EasyDict
 from omegaconf import DictConfig, ListConfig, OmegaConf
 
@@ -81,7 +82,7 @@ def load_yaml(path):
 def get_config(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument("config_file")
-    parser.add_argument("--gpus", type=str, required=True)
+    parser.add_argument("--gpus", type=str)
     parser.add_argument("--debug", action="store_true")
     # parser.add_argument("--outdir")
     opt, unknown = parser.parse_known_args(argv)
@@ -89,8 +90,11 @@ def get_config(argv=None):
     cfg = load_yaml(opt.config_file)
     cli = OmegaConf.from_dotlist(unknown)
     args = OmegaConf.merge(cfg, cli)
+    if "gpus" in args:
+        args.gpus = list(map(int, opt.gpus.split(",")))
+    else:
+        args.gpus = list(range(torch.cuda.device_count()))
 
-    args.gpus = list(map(int, opt.gpus.split(",")))
     args.debug = opt.debug
     # args.outdir = opt.outdir
 
