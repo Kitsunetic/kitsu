@@ -1,4 +1,4 @@
-import gc
+import gc, os
 
 import numpy as np
 import torch as th
@@ -49,16 +49,18 @@ def clear_memory():
 
 def get_mixed_precision_dtype(device):
     # # Check for bfloat16 support on CUDA device
-    # if device.type == "cuda":
-    #     major, minor = th.cuda.get_device_capability(device)
-    #     # Ampere (8.0+) and newer support bfloat16
-    #     if major >= 8:
-    #         return th.bfloat16
-    #     else:
-    #         return th.float16
-    # else:
-    #     # On CPU, bfloat16 is supported but autocast for CPU is less common
-    #     return th.float16
+
+    if int(os.environ.get("USE_BF16", "0")) == 1:
+        if device.type == "cuda":
+            major, minor = th.cuda.get_device_capability(device)
+            # Ampere (8.0+) and newer support bfloat16
+            if major >= 8:
+                return th.bfloat16
+            else:
+                return th.float16
+        else:
+            # On CPU, bfloat16 is supported but autocast for CPU is less common
+            return th.float16
 
     # TODO IDK why, bfloat16 training sometimes makes the model divergent or trained poorly
     return th.float16
