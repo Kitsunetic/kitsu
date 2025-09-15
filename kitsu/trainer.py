@@ -719,8 +719,11 @@ class StepTrainer(BaseTrainer):
         with tqdm(
             total=self.args.epochs, ncols=self.tqdm_ncols, file=sys.stdout, disable=not self.rankzero, desc="Step"
         ) as pbar:
+            if self.epoch > 0:
+                pbar.n = self.epoch
+
             self.model_optim.train()
-            for self.epoch, batch in enumerate(infinite_dataloader(self.dl_train), 1):
+            for self.epoch, batch in enumerate(infinite_dataloader(self.dl_train), self.epoch + 1):
                 self.train_step_idx += 1
                 self.model_optim.train()
                 self.train_batch(batch, o_train)
