@@ -532,9 +532,12 @@ class BaseTrainer(BaseWorker):
                 self.sched.step()
 
     @staticmethod
-    def load_args(args_path: str):
-        with open(args_path, "r") as f:
-            args = EasyDict(yaml.safe_load(f))
+    def load_args(args_path_or_args: str | Path | dict):
+        if isinstance(args_path_or_args, (str, Path)):
+            with open(args_path_or_args, "r") as f:
+                args = EasyDict(yaml.safe_load(f))
+        else:
+            args = args_path_or_args
 
         args.exp_path = Path(args.exp_path)
         args.world_size = 1
@@ -546,8 +549,8 @@ class BaseTrainer(BaseWorker):
         return args
 
     @staticmethod
-    def from_args(args_path: str, ckpt_path: str = None):
-        args = BaseTrainer.load_args(args_path)
+    def from_args(args_path_or_args: str | Path | dict, ckpt_path: str = None):
+        args = BaseTrainer.load_args(args_path_or_args)
         if ckpt_path is not None:
             args.ckpt = ckpt_path
 
