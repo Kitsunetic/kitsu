@@ -1,6 +1,5 @@
 import math
 import sys
-import time
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict, UserDict
 from contextlib import contextmanager
@@ -8,6 +7,7 @@ from copy import deepcopy
 from functools import reduce
 from os import PathLike
 from pathlib import Path
+from pdb import set_trace
 from typing import Callable, Dict, List, Sequence, Tuple, Union
 
 import numpy as np
@@ -145,6 +145,7 @@ class BaseTrainer(BaseWorker):
         gradient_accumulation_steps: int = 1,
         ignore_nan_loss: bool = False,
         metrics_to_ignore: List[str] = [],
+        valid_after_epochs: int = -1,
     ) -> None:
         assert not (mixed_precision and (use_sam or use_esam))
         assert not (gradient_accumulation_steps and (use_sam or use_esam))
@@ -172,6 +173,7 @@ class BaseTrainer(BaseWorker):
         self.gradient_accumulation_steps = gradient_accumulation_steps
         self.ignore_nan_loss = ignore_nan_loss
         self.metrics_to_ignore = metrics_to_ignore
+        self.valid_after_epochs = valid_after_epochs
 
         self.best = math.inf if self.small_is_better else -math.inf
         self.best_epoch = -1
@@ -509,10 +511,12 @@ class BaseTrainer(BaseWorker):
 
     def fit_loop(self):
         o1 = self.train_epoch(self.dl_train)
-        o2 = self.valid_epoch(self.dl_valid)
-        improved = self.evaluation(o2, o1)
-        if improved:
-            self.sample()
+
+        if self.valid_after_epochs < self.epoch:
+            o2 = self.valid_epoch(self.dl_valid)
+            improved = self.evaluation(o2, o1)
+            if improved:
+                self.sample()
 
     def fit(self):
         for self.epoch in range(self.epoch, self.args.epochs + 1):
