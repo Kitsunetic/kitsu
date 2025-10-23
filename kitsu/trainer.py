@@ -309,7 +309,7 @@ class BaseTrainer(BaseWorker):
         if "optim" in ckpt:
             self.optim.load_state_dict(ckpt["optim"])
         if "epoch" in ckpt:
-            self.epoch = ckpt["epoch"]
+            self.epoch = ckpt["epoch"] + 1
         if "sched" in ckpt and ckpt["sched"] is not None and self.sched is not None and hasattr(self.sched, "load_state_dict"):
             self.sched.load_state_dict(ckpt["sched"])
 
