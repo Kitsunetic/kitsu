@@ -306,12 +306,15 @@ class BaseTrainer(BaseWorker):
     def load_checkpoint(self, ckpt: PathLike):
         if "model" in ckpt:
             self.model.load_state_dict(ckpt["model"])
-        if "optim" in ckpt:
-            self.optim.load_state_dict(ckpt["optim"])
-        if "epoch" in ckpt:
-            self.epoch = ckpt["epoch"] + 1
-        if "sched" in ckpt and ckpt["sched"] is not None and self.sched is not None and hasattr(self.sched, "load_state_dict"):
-            self.sched.load_state_dict(ckpt["sched"])
+            if "optim" in ckpt:
+                self.optim.load_state_dict(ckpt["optim"])
+            if "epoch" in ckpt:
+                self.epoch = ckpt["epoch"] + 1
+            if "sched" in ckpt and ckpt["sched"] is not None and self.sched is not None and hasattr(self.sched, "load_state_dict"):
+                self.sched.load_state_dict(ckpt["sched"])
+        else:
+            self.model.load_state_dict(ckpt)
+            self.log.warn("Checkpoint is loaded only for model, not optimizer, scheduler, epoch.")
 
     def step(self, s):
         pass
