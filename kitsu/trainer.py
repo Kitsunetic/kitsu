@@ -310,7 +310,12 @@ class BaseTrainer(BaseWorker):
                 self.optim.load_state_dict(ckpt["optim"])
             if "epoch" in ckpt:
                 self.epoch = ckpt["epoch"] + 1
-            if "sched" in ckpt and ckpt["sched"] is not None and self.sched is not None and hasattr(self.sched, "load_state_dict"):
+            if (
+                "sched" in ckpt
+                and ckpt["sched"] is not None
+                and self.sched is not None
+                and hasattr(self.sched, "load_state_dict")
+            ):
                 self.sched.load_state_dict(ckpt["sched"])
         else:
             self.model.load_state_dict(ckpt)
@@ -546,13 +551,13 @@ class BaseTrainer(BaseWorker):
         else:
             args = args_path_or_args
 
-        args.exp_path = Path(args.exp_path)
-        args.world_size = 1
-        args.ddp = False
-        args.rank = 0
-        args.rankzero = True
-        args.gpu = 0
-        args.log = getLogger()
+        args.exp_path = Path(args.exp_path) if "exp_path" not in args or args.exp_path is None else args.exp_path
+        args.world_size = 1 if "world_size" not in args or args.world_size is None else args.world_size
+        args.ddp = False if "ddp" not in args or args.ddp is None else args.ddp
+        args.rank = 0 if "rank" not in args or args.rank is None else args.rank
+        args.rankzero = True if "rankzero" not in args or args.rankzero is None else args.rankzero
+        args.gpu = 0 if "gpu" not in args or args.gpu is None else args.gpu
+        args.log = getLogger() if "log" not in args or args.log is None else args.log
         return args
 
     @staticmethod
