@@ -557,7 +557,7 @@ class BaseTrainer(BaseWorker):
         args.rank = 0 if "rank" not in args or args.rank is None else args.rank
         args.rankzero = True if "rankzero" not in args or args.rankzero is None else args.rankzero
         args.gpu = 0 if "gpu" not in args or args.gpu is None else args.gpu
-        args.log = getLogger() if "log" not in args or args.log is None else args.log
+        args.log = getLogger() if "log" not in args or args.log is None and args.rankzero else args.log
         return args
 
     @staticmethod
