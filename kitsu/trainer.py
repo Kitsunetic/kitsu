@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from kitsu import utils
-from kitsu.logger import CustomLogger, getLogger
+from kitsu.logger import CustomLogger, getLogger, basicConfig
 from kitsu.utils import instantiate_from_config
 from kitsu.utils.data import infinite_dataloader
 from kitsu.utils.ema import ema
@@ -555,9 +555,13 @@ class BaseTrainer(BaseWorker):
         args.world_size = 1 if "world_size" not in args or args.world_size is None else args.world_size
         args.ddp = False if "ddp" not in args or args.ddp is None else args.ddp
         args.rank = 0 if "rank" not in args or args.rank is None else args.rank
-        args.rankzero = True if "rankzero" not in args or args.rankzero is None else args.rankzero
+        args.rankzero = args.rank == 0 if "rankzero" not in args or args.rankzero is None else args.rankzero
         args.gpu = 0 if "gpu" not in args or args.gpu is None else args.gpu
-        args.log = getLogger() if "log" not in args or args.log is None and args.rankzero else args.log
+
+        if not args.rankzero:
+            basicConfig(filename=None, lock=True)
+        args.log = getLogger() if "log" not in args or args.log is None else args.log
+
         return args
 
     @staticmethod
