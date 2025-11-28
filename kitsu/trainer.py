@@ -56,7 +56,7 @@ class BasePreprocessor(metaclass=ABCMeta):
         elif isinstance(x, List):
             x = [self.to(item) for item in x]
         elif isinstance(x, Tuple):
-            x = (self.to(item) for item in x)
+            x = tuple(self.to(item) for item in x)
         # elif isinstance(x, Sequence):
         #     x = [self.to(item) for item in x]
         return x
