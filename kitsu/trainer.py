@@ -137,8 +137,6 @@ class BaseTrainer(BaseWorker):
         use_sync_bn: bool = False,
         monitor: str = "loss",
         small_is_better: bool = True,
-        use_sam: bool = False,  # Sharpness-Aware Minimization
-        use_esam: bool = False,  # Efficient Sharpness-aware Minimization
         save_only_improved: bool = True,
         tqdm_ncols: int = 128,
         compile_model: bool = False,
@@ -147,10 +145,6 @@ class BaseTrainer(BaseWorker):
         metrics_to_ignore: List[str] = [],
         valid_after_epochs: int = -1,
     ) -> None:
-        assert not (mixed_precision and (use_sam or use_esam))
-        assert not (gradient_accumulation_steps and (use_sam or use_esam))
-        # assert not (use_sam and use_esam)
-
         args.exp_path = Path(args.exp_path)
 
         super().__init__(args)
@@ -165,8 +159,6 @@ class BaseTrainer(BaseWorker):
         self.use_sync_bn = use_sync_bn
         self.monitor = monitor
         self.small_is_better = small_is_better
-        self.use_sam = use_sam
-        self.use_esam = use_esam
         self.save_only_improved = save_only_improved
         self.tqdm_ncols = tqdm_ncols
         self.compile_model = compile_model
@@ -249,11 +241,6 @@ class BaseTrainer(BaseWorker):
 
     def build_optim(self):
         self.optim = utils.instantiate_from_config(self.args.optim, self.model_optim.parameters())
-
-        if self.use_sam:
-            self.optim = SAM(self.model_optim.parameters(), self.optim)
-        elif self.use_esam:
-            self.optim = ESAM(self.model_optim.parameters(), self.optim)
 
     def build_sched(self):
         if "sched" in self.args:
@@ -366,58 +353,53 @@ class BaseTrainer(BaseWorker):
     def on_valid_batch_end(self, s):
         pass
 
+    def _calc_grad(self, batch):
+        s = self.preprocessor(batch, augmentation=True)
+        with autocast(str(self.device), get_mixed_precision_dtype(self.device), enabled=self.mixed_precision):
+            self.step(s)
+
+        loss = s.log.loss
+        if self.gradient_accumulation_steps > 1:
+            loss = loss / self.gradient_accumulation_steps
+
+        if self.mixed_precision:
+            self.scaler.scale(loss).backward()
+        else:
+            loss.backward()
+
+        return s, loss
+
     def train_epoch(self, dl: "DataLoader", prefix="Train"):
         self.model_optim.train()
         o = utils.AverageMeters(keys_to_ignore=self.metrics_to_ignore)
-        gradient_accumulation_cnt = 1  # only when gradient accumultation is on
 
         if self.rankzero:
             desc = f"{prefix} [{self.epoch:04d}/{self.args.epochs:04d}]"
             t = tqdm(total=len(dl.dataset), ncols=self.tqdm_ncols, file=sys.stdout, desc=desc, leave=True)
+
         for self.train_step_idx, batch in enumerate(dl):
             self.on_train_batch_start()
 
-            s = self.preprocessor(batch, augmentation=True)
-            s.do_param_update = True
-            with autocast(str(self.device), get_mixed_precision_dtype(self.device), enabled=self.mixed_precision):
-                self.step(s)
+            if self.train_step_idx % self.gradient_accumulation_steps == 0:  # gradient accumulation
+                s = self._calc_grad(batch)
 
-            if self.mixed_precision:
-                self.scaler.scale(s.log.loss).backward()
-
-                # gradient accumulation
-                if self.gradient_accumulation_steps > 1:
-                    if gradient_accumulation_cnt >= self.gradient_accumulation_steps:
-                        gradient_accumulation_cnt = 1
-                    else:
-                        gradient_accumulation_cnt += 1
-                        s.do_param_update = False
-
-                if s.do_param_update:
+                if self.mixed_precision:
                     if self.clip_grad > 0:  # gradient clipping
                         self.scaler.unscale_(self.optim)
                         nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
                     self.scaler.step(self.optim)
                     self.scaler.update()
                     self.optim.zero_grad()
-            else:
-                s.log.loss.backward()
-                if self.clip_grad > 0:  # gradient clipping
-                    nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
-
-                if self.use_sam or self.use_esam:
-                    self.optim.first_step(zero_grad=True)
-                    s = self.preprocessor(batch, augmentation=True)
-                    with autocast(str(self.device), get_mixed_precision_dtype(self.device), enabled=self.mixed_precision):
-                        self.step(s)
-                    s.log.loss.backward()
-                    self.optim.second_step(zero_grad=False)
                 else:
+                    if self.clip_grad > 0:  # gradient clipping
+                        nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
                     self.optim.step()
-                self.optim.zero_grad()
+                    self.optim.zero_grad()
 
-            if s.do_param_update:
                 self.step_sched(is_on_batch=True)
+            else:
+                with self.model_optim.no_sync():
+                    s = self._calc_grad(batch)
 
             n, g = self.collect_log(s)
             o.update_dict(n, g)
@@ -618,23 +600,23 @@ class StepTrainer(BaseTrainer):
     def train_batch(self, batch, o: utils.AverageMeters):
         self.on_train_batch_start()
 
-        s = self.preprocessor(batch, augmentation=True)
-        with autocast(str(self.device), get_mixed_precision_dtype(self.device), enabled=self.mixed_precision):
-            self.step(s)
+        if self.train_step_idx % self.gradient_accumulation_steps:  # gradient accumulation
+            s = self._calc_grad(batch)
 
-        if self.mixed_precision:
-            self.scaler.scale(s.log.loss).backward()
-            if self.clip_grad > 0:  # gradient clipping
-                self.scaler.unscale_(self.optim)
-                nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
-            self.scaler.step(self.optim)
-            self.scaler.update()
+            if self.mixed_precision:
+                if self.clip_grad > 0:  # gradient clipping
+                    self.scaler.unscale_(self.optim)
+                    nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
+                self.scaler.step(self.optim)
+                self.scaler.update()
+            else:
+                if self.clip_grad > 0:  # gradient clipping
+                    nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
+                self.optim.step()
+            self.optim.zero_grad()
         else:
-            s.log.loss.backward()
-            if self.clip_grad > 0:  # gradient clipping
-                nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
-            self.optim.step()
-        self.optim.zero_grad()
+            with self.model_optim.no_sync():
+                s = self._calc_grad(batch)
 
         n, g = self.collect_log(s)
         o.update_dict(n, g)
