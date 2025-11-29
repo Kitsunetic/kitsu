@@ -367,7 +367,7 @@ class BaseTrainer(BaseWorker):
         else:
             loss.backward()
 
-        return s, loss
+        return s
 
     def train_epoch(self, dl: "DataLoader", prefix="Train"):
         self.model_optim.train()
@@ -398,7 +398,10 @@ class BaseTrainer(BaseWorker):
 
                 self.step_sched(is_on_batch=True)
             else:
-                with self.model_optim.no_sync():
+                if self.ddp:
+                    with self.model_optim.no_sync():
+                        s = self._calc_grad(batch)
+                else:
                     s = self._calc_grad(batch)
 
             n, g = self.collect_log(s)
@@ -615,7 +618,10 @@ class StepTrainer(BaseTrainer):
                 self.optim.step()
             self.optim.zero_grad()
         else:
-            with self.model_optim.no_sync():
+            if self.ddp:
+                with self.model_optim.no_sync():
+                    s = self._calc_grad(batch)
+            else:
                 s = self._calc_grad(batch)
 
         n, g = self.collect_log(s)
