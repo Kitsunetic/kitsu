@@ -380,7 +380,8 @@ class BaseTrainer(BaseWorker):
         for self.train_step_idx, batch in enumerate(dl):
             self.on_train_batch_start()
 
-            if self.train_step_idx % self.gradient_accumulation_steps == 0:  # gradient accumulation
+            # gradient accumulation
+            if (self.train_step_idx + 1) % self.gradient_accumulation_steps == 0 or self.train_step_idx == len(dl) - 1:
                 s = self._calc_grad(batch)
 
                 if self.mixed_precision:
