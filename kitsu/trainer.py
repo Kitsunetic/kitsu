@@ -169,7 +169,7 @@ class BaseTrainer(BaseWorker):
 
         self.best = math.inf if self.small_is_better else -math.inf
         self.best_epoch = -1
-        self.epoch = 1
+        self.epoch = 1 if "last_epoch" not in self.args else self.args.last_epoch
 
         self.on_init_start()
 
@@ -295,7 +295,7 @@ class BaseTrainer(BaseWorker):
             self.model.load_state_dict(ckpt["model"])
             if "optim" in ckpt:
                 self.optim.load_state_dict(ckpt["optim"])
-            if "epoch" in ckpt:
+            if "epoch" in ckpt and "last_epoch" not in self.args:
                 self.epoch = ckpt["epoch"] + 1
             if (
                 "sched" in ckpt
