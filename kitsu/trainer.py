@@ -270,7 +270,7 @@ class BaseTrainer(BaseWorker):
     def load_ckpt(self):
         if "ckpt" in self.args and self.args.ckpt:
             self.log.info("Load checkpoint:", self.args.ckpt)
-            ckpt = th.load(self.args.ckpt, map_location="cpu")
+            ckpt = th.load(self.args.ckpt, map_location="cpu", weights_only=False)
             self.load_checkpoint(ckpt)
 
     def state_dict(self):
