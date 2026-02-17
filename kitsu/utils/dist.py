@@ -43,8 +43,9 @@ def safe_all_gather_object(x: Any) -> List[Any]:
     if dist.is_initialized():
         xs = [None] * dist.get_world_size()
         dist.all_gather_object(xs, x)
-        x = xs
-    return x
+        return xs
+    else:
+        return [x]
 
 
 def safe_all_gather_list_object(x: List[Any]) -> List[Any]:
