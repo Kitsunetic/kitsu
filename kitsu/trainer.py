@@ -21,7 +21,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from kitsu import utils
-from kitsu.logger import CustomLogger, getLogger, basicConfig
+from kitsu.logger import CustomLogger, basicConfig, getLogger
 from kitsu.utils import instantiate_from_config
 from kitsu.utils.data import infinite_dataloader
 from kitsu.utils.ema import ema
@@ -603,8 +603,9 @@ class StepTrainer(BaseTrainer):
 
     def train_batch(self, batch, o: utils.AverageMeters):
         self.on_train_batch_start()
+        is_update_step = self.train_step_idx % self.gradient_accumulation_steps == 0
 
-        if self.train_step_idx % self.gradient_accumulation_steps:  # gradient accumulation
+        if is_update_step:  # gradient accumulation
             s = self._calc_grad(batch)
 
             if self.mixed_precision:
@@ -617,7 +618,9 @@ class StepTrainer(BaseTrainer):
                 if self.clip_grad > 0:  # gradient clipping
                     nn.utils.clip_grad.clip_grad_norm_(self.model_optim.parameters(), self.clip_grad)
                 self.optim.step()
+
             self.optim.zero_grad()
+            self.step_sched(is_on_batch=True)
         else:
             if self.ddp:
                 with self.model_optim.no_sync():
@@ -627,10 +630,7 @@ class StepTrainer(BaseTrainer):
 
         n, g = self.collect_log(s)
         o.update_dict(n, g)
-
         self.on_train_batch_end(s)
-        self.step_sched(is_on_batch=True)
-
         return s
 
     @th.inference_mode()
@@ -731,20 +731,24 @@ class StepTrainer(BaseTrainer):
                 pbar.n = self.epoch
 
             self.model_optim.train()
-            for self.epoch, batch in enumerate(infinite_dataloader(self.dl_train), self.epoch + 1):
+            for batch in infinite_dataloader(self.dl_train):
                 self.train_step_idx += 1
-                self.model_optim.train()
+                is_update_step = self.train_step_idx % self.gradient_accumulation_steps == 0
+
                 self.train_batch(batch, o_train)
-                pbar.set_postfix_str(o_train.to_msg())
 
-                if self._is_eval_stage:
-                    print(flush=True)
-                    self.model_optim.eval()
-                    self.stage_eval(o_train)
-                    o_train = utils.AverageMeters(keys_to_ignore=self.metrics_to_ignore)
-                    self.train_step_idx = 0
+                if is_update_step:
+                    self.epoch += 1
+                    pbar.update()
+                    pbar.set_postfix_str(o_train.to_msg())
 
-                pbar.update()
+                    if self._is_eval_stage:
+                        print(flush=True)
+                        self.model_optim.eval()
+                        self.stage_eval(o_train)
+                        o_train = utils.AverageMeters(keys_to_ignore=self.metrics_to_ignore)
+                        self.train_step_idx = 0
+                        self.model_optim.train()
 
                 if self.args.debug and self.epoch >= 2:
                     break
